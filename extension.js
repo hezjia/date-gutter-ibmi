@@ -154,10 +154,22 @@ async function updateDecorations(editor) {
             }
         }
 
-        // 应用两种装饰器
+        // 创建操作图标装饰器
+        const actionDecorations = [];
+        for (let i = 0; i < document.lineCount; i++) {
+            const line = document.lineAt(i);
+            if (line.text.trim().length > 0) {
+                actionDecorations.push({
+                    range: line.range
+                });
+            }
+        }
+
+        // 应用三种装饰器
         await Promise.all([
             Promise.resolve(editor.setDecorations(dateGutterDecorationType, gutterDecorations)),
-            Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations))
+            Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations)),
+            Promise.resolve(editor.setDecorations(gutterActionDecorationType, actionDecorations))
         ]);
     } catch (error) {
         console.error('Error updating decorations:', error);
@@ -224,6 +236,12 @@ function activate(context) {
         textDecoration: 'none; display: none',
         color: 'transparent',
         opacity: '0'
+    });
+
+    // 创建gutter操作图标装饰器
+    const gutterActionDecorationType = vscode.window.createTextEditorDecorationType({
+        gutterIconPath: vscode.Uri.parse('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M3 9.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>'),
+        gutterIconSize: 'contain'
     });
 
     // 注册文本编辑器变更事件
@@ -413,15 +431,85 @@ function activate(context) {
         })
     );
 
-    // 确保装饰器类型被正确清理
+    // 添加gutter图标点击监听器
+    const gutterActionClick = vscode.window.onDidChangeTextEditorSelection(async event => {
+        try {
+            if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse && 
+                event.selections.length > 0) {
+                const position = event.selections[0].active;
+                if (position.character === 0) {
+                    await showGutterMenu(event.textEditor, position.line);
+                }
+            }
+        } catch (error) {
+            console.error('Error handling gutter click:', error);
+        }
+    });
+
+    // 确保装饰器类型和监听器被正确清理
     context.subscriptions.push({
         dispose: () => {
             if (dateGutterDecorationType) {
                 dateGutterDecorationType.dispose();
                 dateGutterDecorationType = undefined;
             }
+            gutterActionClick.dispose();
         }
     });
+}
+
+// 处理行删除
+async function deleteLine(editor, line) {
+    if (!editor || !editor.document) return;
+    
+    const range = new vscode.Range(
+        new vscode.Position(line, 0),
+        new vscode.Position(line, editor.document.lineAt(line).text.length)
+    );
+    
+    await editor.edit(editBuilder => {
+        editBuilder.delete(range);
+    });
+}
+
+// 处理行复制
+async function copyLine(editor, line) {
+    if (!editor || !editor.document) return;
+    
+    const text = editor.document.lineAt(line).text;
+    await vscode.env.clipboard.writeText(text);
+    vscode.window.showInformationMessage('行内容已复制到剪贴板');
+}
+
+// 显示浮动菜单
+async function showGutterMenu(editor, line) {
+    const items = [
+        {
+            label: '$(copy) 复制行',
+            description: '复制当前行内容',
+            action: 'copy'
+        },
+        {
+            label: '$(trash) 删除行',
+            description: '删除当前行',
+            action: 'delete'
+        }
+    ];
+    
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: '选择操作'
+    });
+    
+    if (selected) {
+        switch (selected.action) {
+            case 'copy':
+                await copyLine(editor, line);
+                break;
+            case 'delete':
+                await deleteLine(editor, line);
+                break;
+        }
+    }
 }
 
 function deactivate() {

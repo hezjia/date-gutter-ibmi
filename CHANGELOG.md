@@ -40,4 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced gutter display with default date indicators
 
 ## [Unreleased]
-- No unreleased changes at this time
+
+### Added
+- Gutter floating menu for quick line operations
+  - Copy line content to clipboard
+  - Delete current line
+- Clickable gutter icons (three dots) for menu access
+- New commands for line operations:
+  - `extension.gutterAction.copyLine`
+  - `extension.gutterAction.deleteLine`
+
+### Changed
+- Updated gutter display to include action icons
+- Improved context menu integration
+- Enhanced documentation with new feature details

@@ -14,6 +14,10 @@ IBMi source files use date to keep track changes, RTC download source contains t
 - **Date Commands**: 
   - Insert current date at cursor position
   - Update existing date to current date
+- **Gutter Menu**:
+  - Clickable gutter icons for quick line operations
+  - Copy line content to clipboard
+  - Delete current line
 
 ## Installation
 
@@ -33,6 +37,23 @@ IBMi source files use date to keep track changes, RTC download source contains t
 
 - `Date Gutter: Insert Date`: Inserts current date at cursor position
 - `Date Gutter: Update Line Date`: Updates the date at the beginning of the current line to today's date
+
+### Gutter Menu
+
+The extension provides quick access to common line operations through a gutter menu:
+
+1. **Accessing the Menu**:
+   - Look for the three-dot icon (⋮) in the gutter area (left margin) of each line
+   - Click the icon to open the floating menu
+
+2. **Available Operations**:
+   - **Copy Line**: Copies the entire line content to clipboard
+   - **Delete Line**: Removes the current line from the file
+
+3. **Tips**:
+   - The gutter menu is available for all supported IBMi file types
+   - Operations are immediate and cannot be undone
+   - Use with caution, especially the delete operation
 
 ## Extension Settings
 
