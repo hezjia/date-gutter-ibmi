@@ -1,0 +1,67 @@
+{
+  "name": "date-gutter-ibmi",
+  "publisher": "zhuojia-he",
+  "displayName": "Date Gutter for IBMi",
+  "description": "Display and update YYMMDD dates in the gutter for IBMi source files",
+  "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hezjia/date-gutter-ibmi.git"
+  },
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Formatters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Date Gutter",
+      "properties": {
+        "dateGutter.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the date gutter extension"
+        },
+        "dateGutter.enabledFileTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".rpgle",
+            ".sqlrpgle",
+            ".clle",
+            ".clp",
+            ".dspf",
+            ".prtf",
+            ".pf",
+            ".lf",
+            ".cmd",
+            ".bnd",
+            ".srvpgm"
+          ],
+          "description": "File extensions where date gutter should be enabled. Default includes IBMi source types"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.99.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "eslint": "^9.23.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1"
+  }
+}
