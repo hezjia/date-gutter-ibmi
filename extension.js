@@ -62,10 +62,16 @@ function isDateFormat(text) {
     return true;
 }
 
-// 从文本行提取日期
+// 生成行号（6位数字，最大999999）
+function generateLineNumber(lineIndex) {
+    const sequenceNum = Math.min(lineIndex + 1, 999999);
+    return sequenceNum.toString().padStart(6, '0');
+}
+
+// 从文本行提取日期 (now looks at positions 6-11 after 6-digit sequence)
 function extractDateFromLine(line) {
-    if (line.length >= 6) {
-        const dateStr = line.slice(0, 6);
+    if (line.length >= 12) {
+        const dateStr = line.slice(6, 12);
         if (isDateFormat(dateStr)) {
             const year = parseInt('20' + dateStr.slice(0, 2));
             const month = parseInt(dateStr.slice(2, 4)) - 1;
@@ -140,8 +146,8 @@ async function updateDecorations(editor) {
             if (shouldHide) {
                 const hideDecoration = {
                     range: new vscode.Range(
-                        new vscode.Position(i, 0),
-                        new vscode.Position(i, 6)
+                        new vscode.Position(i, 0),  // Start at position 0 (sequence)
+                        new vscode.Position(i, 12)  // End at position 12 (end of date)
                     )
                 };
                 hideDecorations.push(hideDecoration);
@@ -177,13 +183,13 @@ async function updateLineDate(editor, line) {
         const lineText = document.lineAt(line).text;
         const newDate = formatDateToYYMMDD(new Date());
         
-        if (lineText.length >= 6) {
+        if (lineText.length >= 12) {
             const edit = new vscode.WorkspaceEdit();
             edit.replace(
                 document.uri,
                 new vscode.Range(
-                    new vscode.Position(line, 0),
-                    new vscode.Position(line, 6)
+                    new vscode.Position(line, 6),  // Start at position 6 (after sequence)
+                    new vscode.Position(line, 12)  // End at position 12 (end of date)
                 ),
                 newDate
             );
@@ -296,11 +302,12 @@ function activate(context) {
                         for (const line of newLines) {
                             const lineText = activeEditor.document.lineAt(line).text;
                             // 只在空行或不以日期开头的行添加日期
-                            if (!lineText.trim() || !isDateFormat(lineText.substring(0, 6))) {
+                            if (!lineText.trim() || !isDateFormat(lineText.substring(6, 12))) {
+                                const sequence = generateLineNumber(line);
                                 edit.insert(
                                     activeEditor.document.uri,
                                     new vscode.Position(line, 0),
-                                    newDate
+                                    sequence + newDate
                                 );
                             }
                         }
@@ -335,6 +342,53 @@ function activate(context) {
         vscode.workspace.onWillSaveTextDocument(async event => {
             try {
                 if (activeEditor && event.document === activeEditor.document) {
+                    const document = event.document;
+                    const edit = new vscode.WorkspaceEdit();
+                    let modified = false;
+                    
+                    // Check each line for missing prefix
+                    for (let i = 0; i < document.lineCount; i++) {
+                        const line = document.lineAt(i);
+                        const text = line.text;
+                        
+                        // Skip empty lines
+                        if (text.trim().length === 0) continue;
+                        
+                        // Check if line has complete prefix
+                        if (text.length < 12 || !/^\d{12}/.test(text)) {
+                            const sequence = generateLineNumber(i);
+                            // Use 000000 as default date
+                            const newPrefix = sequence + '000000';
+                            
+                            // Replace or insert prefix
+                            if (text.length >= 6 && /^\d{6}/.test(text)) {
+                                // Has partial prefix (sequence only)
+                                edit.replace(
+                                    document.uri,
+                                    new vscode.Range(
+                                        new vscode.Position(i, 0),
+                                        new vscode.Position(i, 6)
+                                    ),
+                                    newPrefix
+                                );
+                            } else {
+                                // No prefix at all
+                                edit.insert(
+                                    document.uri,
+                                    new vscode.Position(i, 0),
+                                    newPrefix
+                                );
+                            }
+                            modified = true;
+                        }
+                    }
+                    
+                    // Apply edits if needed
+                    if (modified) {
+                        await vscode.workspace.applyEdit(edit);
+                    }
+                    
+                    // Update decorations
                     await updateDecorations(activeEditor);
                 }
             } catch (error) {
