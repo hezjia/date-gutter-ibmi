@@ -3,7 +3,7 @@
   "publisher": "zhuojia-he",
   "displayName": "Date Gutter for IBMi",
   "description": "Display and update YYMMDD dates in the gutter for IBMi source files",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/hezjia/date-gutter-ibmi.git"

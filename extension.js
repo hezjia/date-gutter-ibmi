@@ -1,32 +1,46 @@
 const vscode = require('vscode');
 
-// 创建装饰器类型
+// Create decorator types
 let dateGutterDecorationType;
 let dateHideDecorationType;
+let gutterActionDecorationType;
 
-// 获取配置
+// Get configuration
 function getConfiguration() {
     return vscode.workspace.getConfiguration('dateGutter');
 }
 
-// 检查文件是否应该启用日期装饰器
+// Check if date decorator should be enabled for the file
 function shouldEnableForFile(document) {
     const config = getConfiguration();
     
-    // 检查扩展是否被启用
+    // Check if extension is enabled
     if (!config.get('enabled', true)) {
         return false;
     }
 
-    // 获取启用的文件类型
+    // Enable only for local files
+    if (document.uri.scheme !== 'file') {
+        return false;
+    }
+
+    // Check if opened in codefori object browser
+    if (document.uri.scheme === 'objectBrowser' || 
+        document.uri.scheme === 'member' || 
+        document.uri.scheme === 'streamfile' ||
+        document.uri.path.startsWith('/IBMi/')) {
+        return false;
+    }
+
+    // Get enabled file types
     const enabledFileTypes = config.get('enabledFileTypes', ['.txt', '.md']);
     
-    // 检查文件扩展名是否在启用列表中
+    // Check if file extension is in enabled list
     const fileExtension = '.' + document.fileName.split('.').pop().toLowerCase();
     return enabledFileTypes.includes(fileExtension);
 }
 
-// 格式化日期为YYMMDD格式
+// Format Date YYMMDD
 function formatDateToYYMMDD(date) {
     const year = date.getFullYear().toString().slice(-2);
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -34,7 +48,7 @@ function formatDateToYYMMDD(date) {
     return `${year}${month}${day}`;
 }
 
-// 检查文本是否符合日期格式（YYMMDD）
+// Check if Date in YYMMDD format
 function isDateFormat(text) {
     if (!text || text.length !== 6) {
         return false;
@@ -62,7 +76,7 @@ function isDateFormat(text) {
     return true;
 }
 
-// 生成行号（6位数字，最大999999）
+// Generate Line Number Maximum 999999
 function generateLineNumber(lineIndex) {
     const sequenceNum = Math.min(lineIndex + 1, 999999);
     return sequenceNum.toString().padStart(6, '0');
@@ -88,7 +102,7 @@ function extractDateFromLine(line) {
 // 更新装饰器
 async function updateDecorations(editor) {
     try {
-        if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType) {
+        if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType || !gutterActionDecorationType) {
             console.log('Editor, document or decoration types are not available');
             return;
         }
@@ -100,6 +114,7 @@ async function updateDecorations(editor) {
             // 清除现有的装饰器
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
+            editor.setDecorations(gutterActionDecorationType, []);
             return;
         }
 
@@ -115,35 +130,25 @@ async function updateDecorations(editor) {
                 continue;
             }
 
-            const date = extractDateFromLine(text);
-            let dateStr;
-            let shouldHide = false;
+            // 检查前12位是否都是数字
+            if (text.length >= 12 && /^\d{12}/.test(text)) {
+                // 提取日期部分
+                const dateStr = text.slice(6, 12);
 
-            if (date) {
-                // 如果找到有效日期
-                dateStr = formatDateToYYMMDD(date);
-                shouldHide = true;
-            } else {
-                // 如果没有找到有效日期，使用 "000000"
-                dateStr = "000000";
-                shouldHide = false;
-            }
+                // Gutter 装饰器：显示日期
+                const gutterDecoration = {
+                    renderOptions: {
+                        before: {
+                            contentText: dateStr,
+                            color: '#888888',
+                            margin: '0 10px 0 0'
+                        }
+                    },
+                    range: line.range
+                };
+                gutterDecorations.push(gutterDecoration);
 
-            // Gutter 装饰器：显示日期
-            const gutterDecoration = {
-                renderOptions: {
-                    before: {
-                        contentText: dateStr,
-                        color: date ? '#888888' : '#CCCCCC', // 默认日期使用更浅的颜色
-                        margin: '0 10px 0 0'
-                    }
-                },
-                range: line.range
-            };
-            gutterDecorations.push(gutterDecoration);
-
-            // 只有在找到实际日期时才隐藏文本
-            if (shouldHide) {
+                // 隐藏前12位数字
                 const hideDecoration = {
                     range: new vscode.Range(
                         new vscode.Position(i, 0),  // Start at position 0 (sequence)
@@ -165,7 +170,7 @@ async function updateDecorations(editor) {
             }
         }
 
-        // 应用三种装饰器
+        // 应用装饰器
         await Promise.all([
             Promise.resolve(editor.setDecorations(dateGutterDecorationType, gutterDecorations)),
             Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations)),
@@ -239,7 +244,7 @@ function activate(context) {
     });
 
     // 创建gutter操作图标装饰器
-    const gutterActionDecorationType = vscode.window.createTextEditorDecorationType({
+    gutterActionDecorationType = vscode.window.createTextEditorDecorationType({
         gutterIconPath: vscode.Uri.parse('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M3 9.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>'),
         gutterIconSize: 'contain'
     });
@@ -478,26 +483,26 @@ async function copyLine(editor, line) {
     
     const text = editor.document.lineAt(line).text;
     await vscode.env.clipboard.writeText(text);
-    vscode.window.showInformationMessage('行内容已复制到剪贴板');
+    vscode.window.showInformationMessage('Line content copied to clipboard');
 }
 
 // 显示浮动菜单
 async function showGutterMenu(editor, line) {
     const items = [
         {
-            label: '$(copy) 复制行',
-            description: '复制当前行内容',
+            label: '$(copy) Copy Line',
+            description: 'Copy current line content',
             action: 'copy'
         },
         {
-            label: '$(trash) 删除行',
-            description: '删除当前行',
+            label: '$(trash) Delete Line',
+            description: 'Delete current line',
             action: 'delete'
         }
     ];
     
     const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: '选择操作'
+        placeHolder: 'Select Action'
     });
     
     if (selected) {
