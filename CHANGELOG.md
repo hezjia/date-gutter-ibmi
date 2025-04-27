@@ -41,6 +41,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2023-10-20
+
+### Added
+- Smart copy functionality (Ctrl+C) that automatically excludes prefix numbers
+- New command `dateGutter.copyWithoutPrefix` for filtered copying
+- Key binding configuration for Ctrl+C/Command+C
+- Debug logging for copy operations
+
+### Changed
+- Updated README with new feature documentation
+- Improved copy behavior for multi-line selections
+- Modified gutter decoration settings for better selection handling
+
+## [Unreleased]
+
 ### Added
 - Gutter floating menu for quick line operations
   - Copy line content to clipboard

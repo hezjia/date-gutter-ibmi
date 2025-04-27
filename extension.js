@@ -3,7 +3,6 @@ const vscode = require('vscode');
 // Create decorator types
 let dateGutterDecorationType;
 let dateHideDecorationType;
-let gutterActionDecorationType;
 
 // Get configuration
 function getConfiguration() {
@@ -82,39 +81,20 @@ function generateLineNumber(lineIndex) {
     return sequenceNum.toString().padStart(6, '0');
 }
 
-// 从文本行提取日期 (now looks at positions 6-11 after 6-digit sequence)
-function extractDateFromLine(line) {
-    if (line.length >= 12) {
-        const dateStr = line.slice(6, 12);
-        if (isDateFormat(dateStr)) {
-            const year = parseInt('20' + dateStr.slice(0, 2));
-            const month = parseInt(dateStr.slice(2, 4)) - 1;
-            const day = parseInt(dateStr.slice(4, 6));
-            const date = new Date(year, month, day);
-            if (!isNaN(date.getTime())) {
-                return date;
-            }
-        }
-    }
-    return null;
-}
 
 // 更新装饰器
 async function updateDecorations(editor) {
     try {
-        if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType || !gutterActionDecorationType) {
+        if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType) {
             console.log('Editor, document or decoration types are not available');
             return;
         }
 
         const document = editor.document;
         
-        // 检查文件是否应该启用装饰器
         if (!shouldEnableForFile(document)) {
-            // 清除现有的装饰器
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
-            editor.setDecorations(gutterActionDecorationType, []);
             return;
         }
 
@@ -148,7 +128,7 @@ async function updateDecorations(editor) {
                 };
                 gutterDecorations.push(gutterDecoration);
 
-                // 隐藏前12位数字
+                // Hide first 12 digits while keeping them clickable
                 const hideDecoration = {
                     range: new vscode.Range(
                         new vscode.Position(i, 0),  // Start at position 0 (sequence)
@@ -158,23 +138,11 @@ async function updateDecorations(editor) {
                 hideDecorations.push(hideDecoration);
             }
         }
-
-        // 创建操作图标装饰器
-        const actionDecorations = [];
-        for (let i = 0; i < document.lineCount; i++) {
-            const line = document.lineAt(i);
-            if (line.text.trim().length > 0) {
-                actionDecorations.push({
-                    range: line.range
-                });
-            }
-        }
-
+ 
         // 应用装饰器
         await Promise.all([
             Promise.resolve(editor.setDecorations(dateGutterDecorationType, gutterDecorations)),
-            Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations)),
-            Promise.resolve(editor.setDecorations(gutterActionDecorationType, actionDecorations))
+            Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations))
         ]);
     } catch (error) {
         console.error('Error updating decorations:', error);
@@ -229,24 +197,69 @@ async function updateLineDate(editor, line) {
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+
     console.log('date-gutter-extension is now active!');
 
-    // 创建装饰器类型
+    // Create decorator types with gutter display configuration
     dateGutterDecorationType = vscode.window.createTextEditorDecorationType({
         isWholeLine: true,
+        gutterIconPath: context.asAbsolutePath('icon.png'),
+        gutterIconSize: 'contain',
+        after: {
+            margin: '0 0 0 1em',
+            width: '6em'
+        }
     });
 
-    // 创建隐藏日期文本的装饰器类型
+    // Create decorator type for hiding date text while keeping it clickable
     dateHideDecorationType = vscode.window.createTextEditorDecorationType({
-        textDecoration: 'none; display: none',
+        textDecoration: 'none',
+        opacity: '0',
         color: 'transparent',
-        opacity: '0'
+        letterSpacing: '-12ch',  // 压缩字符间距
+        position: 'absolute',    // 绝对定位
+        width: '0',              // 宽度设为0
+        marginRight: '-12ch',    // 负边距补偿
+        before: {
+            contentText: '',
+            width: '0',
+            margin: '0'
+        }
     });
 
-    // 创建gutter操作图标装饰器
-    gutterActionDecorationType = vscode.window.createTextEditorDecorationType({
-        gutterIconPath: vscode.Uri.parse('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="currentColor" d="M3 9.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>'),
-        gutterIconSize: 'contain'
+    // Handle multi-line selection adjustments
+    vscode.window.onDidChangeTextEditorSelection(event => {
+        if (!event.selections || event.selections.length === 0) return;
+        
+        const editor = event.textEditor;
+        const newSelections = [];
+        let modified = false;
+
+        for (const selection of event.selections) {
+            // Skip if single-line selection or no overlap with prefix area
+            if (selection.isSingleLine || selection.start.character >= 12) {
+                newSelections.push(selection);
+                continue;
+            }
+
+            // Adjust selection to start after 12-character prefix
+            const adjustedStart = new vscode.Position(
+                selection.start.line,
+                Math.max(12, selection.start.character)
+            );
+            const adjustedEnd = selection.end;
+            
+            if (!adjustedStart.isEqual(selection.start)) {
+                newSelections.push(new vscode.Selection(adjustedStart, adjustedEnd));
+                modified = true;
+            } else {
+                newSelections.push(selection);
+            }
+        }
+
+        if (modified) {
+            editor.selections = newSelections;
+        }
     });
 
     // 注册文本编辑器变更事件
@@ -324,8 +337,8 @@ function activate(context) {
                         
                         for (const line of newLines) {
                             const lineText = activeEditor.document.lineAt(line).text;
-                            // 只在空行或不以日期开头的行添加日期
-                            if (!lineText.trim() || !isDateFormat(lineText.substring(6, 12))) {
+                            // Add 12-digit prefix (6 line number + 6 zeros) if missing
+                            if (lineText.length < 12 || !/^\d{12}/.test(lineText.substr(0, 12))) {
                                 const sequence = generateLineNumber(line);
                                 edit.insert(
                                     activeEditor.document.uri,
@@ -368,24 +381,24 @@ function activate(context) {
                     const document = event.document;
                     const edit = new vscode.WorkspaceEdit();
                     let modified = false;
-                    
-                    // Check each line for missing prefix
+
                     for (let i = 0; i < document.lineCount; i++) {
                         const line = document.lineAt(i);
                         const text = line.text;
                         
                         // Skip empty lines
-                        if (text.trim().length === 0) continue;
+                        if (text.trim().length === 0) {
+                            continue;
+                        }
                         
-                        // Check if line has complete prefix
-                        if (text.length < 12 || !/^\d{12}/.test(text)) {
+                        const needsPrefix = text.length < 12 || !/^\d{12}/.test(text.substr(0, 12));
+                        
+                        if (needsPrefix) {
                             const sequence = generateLineNumber(i);
-                            // Use 000000 as default date
-                            const newPrefix = sequence + '000000';
+                            const newPrefix = sequence + '000000'; // Fixed 6 zeros as date
                             
                             // Replace or insert prefix
                             if (text.length >= 6 && /^\d{6}/.test(text)) {
-                                // Has partial prefix (sequence only)
                                 edit.replace(
                                     document.uri,
                                     new vscode.Range(
@@ -395,7 +408,6 @@ function activate(context) {
                                     newPrefix
                                 );
                             } else {
-                                // No prefix at all
                                 edit.insert(
                                     document.uri,
                                     new vscode.Position(i, 0),
@@ -407,7 +419,7 @@ function activate(context) {
                     }
                     
                     // Apply edits if needed
-                    if (modified) {
+                    if (modified) {                        
                         await vscode.workspace.applyEdit(edit);
                     }
                     
@@ -436,96 +448,116 @@ function activate(context) {
         })
     );
 
-    // 添加gutter图标点击监听器
-    const gutterActionClick = vscode.window.onDidChangeTextEditorSelection(async event => {
-        try {
-            if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse && 
-                event.selections.length > 0) {
-                const position = event.selections[0].active;
-                if (position.character === 0) {
-                    await showGutterMenu(event.textEditor, position.line);
+    // Listen for text document open
+    context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument(async document => {
+            if (shouldEnableForFile(document)) {
+                const editor = vscode.window.activeTextEditor;
+                if (editor && editor.document === document) {
+                    const config = getConfiguration();
+                    
+                    // Only auto-complete if enabled in settings
+                    const autoCompleteEnabled = config.get('autoCompletePrefix', true);
+                    console.log(`Auto-complete prefix enabled: ${autoCompleteEnabled}`);
+                    
+                    if (autoCompleteEnabled) {
+                        // Check and add line numbers if needed
+                        const edit = new vscode.WorkspaceEdit();
+                        let modified = false;
+                        let linesModified = 0;
+
+                        for (let i = 0; i < document.lineCount; i++) {
+                            const line = document.lineAt(i);
+                            const text = line.text;
+
+                            // Skip empty lines
+                            if (text.trim().length === 0) {
+                                console.log(`Skipping empty line ${i}`);
+                                continue;
+                            }
+
+                            const needsPrefix = text.length < 12 || !/^\d{12}/.test(text.substr(0, 12));
+                            console.log(`Line ${i}: needsPrefix=${needsPrefix}, text=${text.substr(0, 12)}...`);
+
+                            if (needsPrefix) {
+                                const lineNumber = generateLineNumber(i);
+                                const newPrefix = lineNumber + '000000'; // Fixed 6 zeros as date
+                                
+                                console.log(`Adding prefix to line ${i}: ${newPrefix}`);
+                                edit.insert(
+                                    document.uri,
+                                    new vscode.Position(i, 0),
+                                    newPrefix
+                                );
+                                modified = true;
+                                linesModified++;
+                            }
+                        }
+
+                        // Apply edits if needed
+                        if (modified) {
+                            console.log(`Applying edits to ${linesModified} lines`);
+                            const editResult = await vscode.workspace.applyEdit(edit);
+                            console.log(`Edit applied successfully: ${editResult}`);
+                            if (!editResult) {
+                                console.error('Failed to apply workspace edit');
+                            }
+                        } else {
+                            console.log('No lines needed prefix updates');
+                        }
+                    }
+                    await updateDecorations(editor);
                 }
             }
-        } catch (error) {
-            console.error('Error handling gutter click:', error);
-        }
-    });
+        })
+    );
 
-    // 确保装饰器类型和监听器被正确清理
+    // Register copy without prefix command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('dateGutter.copyWithoutPrefix', copyWithoutPrefix)
+    );
+
+    // Ensure decorator types are properly cleaned up
     context.subscriptions.push({
         dispose: () => {
             if (dateGutterDecorationType) {
                 dateGutterDecorationType.dispose();
                 dateGutterDecorationType = undefined;
             }
-            gutterActionClick.dispose();
+            if (dateHideDecorationType) {
+                dateHideDecorationType.dispose();
+                dateHideDecorationType = undefined;
+            }
         }
     });
 }
 
-// 处理行删除
-async function deleteLine(editor, line) {
-    if (!editor || !editor.document) return;
-    
-    const range = new vscode.Range(
-        new vscode.Position(line, 0),
-        new vscode.Position(line, editor.document.lineAt(line).text.length)
-    );
-    
-    await editor.edit(editBuilder => {
-        editBuilder.delete(range);
-    });
-}
+// Handle copying text while excluding first 12 digits
+async function copyWithoutPrefix() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
 
-// 处理行复制
-async function copyLine(editor, line) {
-    if (!editor || !editor.document) return;
-    
-    const text = editor.document.lineAt(line).text;
-    await vscode.env.clipboard.writeText(text);
-    vscode.window.showInformationMessage('Line content copied to clipboard');
-}
-
-// 显示浮动菜单
-async function showGutterMenu(editor, line) {
-    const items = [
-        {
-            label: '$(copy) Copy Line',
-            description: 'Copy current line content',
-            action: 'copy'
-        },
-        {
-            label: '$(trash) Delete Line',
-            description: 'Delete current line',
-            action: 'delete'
-        }
-    ];
-    
-    const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select Action'
-    });
-    
-    if (selected) {
-        switch (selected.action) {
-            case 'copy':
-                await copyLine(editor, line);
-                break;
-            case 'delete':
-                await deleteLine(editor, line);
-                break;
+    let fullText = '';
+    for (const selection of editor.selections) {
+        for (let i = selection.start.line; i <= selection.end.line; i++) {
+            const lineText = editor.document.lineAt(i).text;
+            // Skip first 12 digits if they exist
+            fullText += (lineText.length > 12 && /^\d{12}/.test(lineText) 
+                ? lineText.substring(12) 
+                : lineText) + '\n';
         }
     }
+    
+    await vscode.env.clipboard.writeText(fullText.trim());
+    vscode.window.showInformationMessage('Copied (excluding prefix numbers)');
 }
 
 function deactivate() {
     try {
-        // 清理 gutter 装饰器
         if (dateGutterDecorationType) {
             dateGutterDecorationType.dispose();
             dateGutterDecorationType = undefined;
         }
-        
-        // 清理隐藏日期的装饰器
         if (dateHideDecorationType) {
             dateHideDecorationType.dispose();
             dateHideDecorationType = undefined;

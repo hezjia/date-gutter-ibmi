@@ -14,6 +14,10 @@ IBMi source files use date to keep track changes, RTC download source contains t
 - **Date Commands**: 
   - Insert current date at cursor position
   - Update existing date to current date
+- **Smart Copy**:
+  - Automatically excludes prefix numbers when copying (Ctrl+C)
+  - Works with both single and multi-line selections
+  - Preserves original text formatting
 - **Gutter Menu**:
   - Clickable gutter icons for quick line operations
   - Copy line content to clipboard
