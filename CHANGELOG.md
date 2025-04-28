@@ -5,7 +5,7 @@ All notable changes to the "date-gutter-ibmi" extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2023-09-15
+## [1.0.0] - 2025-04-25
 
 ### Added
 - Initial release of Date Gutter for IBMi
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.3] - 2023-10-20
+## [1.1.3] - 2024-04-26
 
 ### Added
 - Smart copy functionality (Ctrl+C) that automatically excludes prefix numbers
@@ -54,18 +54,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved copy behavior for multi-line selections
 - Modified gutter decoration settings for better selection handling
 
-## [Unreleased]
+## [1.2.0] - 2024-04-28
 
 ### Added
-- Gutter floating menu for quick line operations
-  - Copy line content to clipboard
-  - Delete current line
-- Clickable gutter icons (three dots) for menu access
-- New commands for line operations:
-  - `extension.gutterAction.copyLine`
-  - `extension.gutterAction.deleteLine`
+- Code action menu (light bulb) for selected lines
+  - "Copy Selected Lines": Copy selected text without 12-digit prefix
+  - "Delete Selected Lines": Delete selected lines completely
+- Enhanced line deletion:
+  - Removes entire line content including hidden 12-digit prefix
+  - Automatically cleans up gutter decorations
+  - Works with multi-line selections
+- Improved selection handling:
+  - Better multi-line selection support
+  - Maintains cursor position after operations
+  - Proper handling of line endings
 
 ### Changed
-- Updated gutter display to include action icons
-- Improved context menu integration
-- Enhanced documentation with new feature details
+- Optimized decoration updates for better performance
+- Improved error handling and user feedback
+- Enhanced selection behavior for numbered lines
+- Updated documentation with new features
+- Remove Key binding configuration for Ctrl+C/Command+C

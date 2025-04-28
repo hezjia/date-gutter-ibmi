@@ -82,17 +82,42 @@ function generateLineNumber(lineIndex) {
 }
 
 
+// Debounce function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 // 更新装饰器
-async function updateDecorations(editor) {
+const updateDecorations = debounce(async (editor) => {
     try {
         if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType) {
-            console.log('Editor, document or decoration types are not available');
+            // 如果编辑器无效，清除所有装饰器
+            if (editor) {
+                editor.setDecorations(dateGutterDecorationType, []);
+                editor.setDecorations(dateHideDecorationType, []);
+            }
             return;
         }
 
         const document = editor.document;
         
+        // 检查文件类型是否启用该功能
         if (!shouldEnableForFile(document)) {
+            editor.setDecorations(dateGutterDecorationType, []);
+            editor.setDecorations(dateHideDecorationType, []);
+            return;
+        }
+
+        // 检查文档是否还有内容
+        if (document.lineCount === 0) {
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
             return;
@@ -100,54 +125,60 @@ async function updateDecorations(editor) {
 
         const gutterDecorations = [];
         const hideDecorations = [];
+        const visibleRanges = editor.visibleRanges;
+        
+        // 如果没有可见范围，使用整个文档
+        const rangesToProcess = visibleRanges.length > 0 
+            ? visibleRanges 
+            : [new vscode.Range(0, 0, document.lineCount - 1, 0)];
 
-        for (let i = 0; i < document.lineCount; i++) {
-            const line = document.lineAt(i);
-            const text = line.text;
-            
-            // 检查行是否为空
-            if (text.trim().length === 0) {
-                continue;
-            }
+        for (const range of rangesToProcess) {
+            const startLine = range.start.line;
+            const endLine = range.end.line;
 
-            // 检查前12位是否都是数字
-            if (text.length >= 12 && /^\d{12}/.test(text)) {
-                // 提取日期部分
-                const dateStr = text.slice(6, 12);
+            for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
+                try {
+                    const line = document.lineAt(lineNum);
+                    const text = line.text;
+                    
+                    if (text.length >= 12 && /^\d{12}/.test(text)) {
+                        const dateStr = text.slice(6, 12);
+                        const decorationRange = new vscode.Range(
+                            new vscode.Position(lineNum, 0),
+                            new vscode.Position(lineNum, 12)
+                        );
 
-                // Gutter 装饰器：显示日期
-                const gutterDecoration = {
-                    renderOptions: {
-                        before: {
-                            contentText: dateStr,
-                            color: '#888888',
-                            margin: '0 10px 0 0'
-                        }
-                    },
-                    range: line.range
-                };
-                gutterDecorations.push(gutterDecoration);
-
-                // Hide first 12 digits while keeping them clickable
-                const hideDecoration = {
-                    range: new vscode.Range(
-                        new vscode.Position(i, 0),  // Start at position 0 (sequence)
-                        new vscode.Position(i, 12)  // End at position 12 (end of date)
-                    )
-                };
-                hideDecorations.push(hideDecoration);
+                        gutterDecorations.push({
+                            range: line.range,
+                            renderOptions: {
+                                before: {
+                                    contentText: dateStr,
+                                    color: '#888888',
+                                    margin: '0 10px 0 0'
+                                }
+                            }
+                        });
+                        hideDecorations.push({ range: decorationRange });
+                    }
+                } catch (error) {
+                    // 如果行不存在（可能被删除），跳过
+                    continue;
+                }
             }
         }
- 
-        // 应用装饰器
-        await Promise.all([
-            Promise.resolve(editor.setDecorations(dateGutterDecorationType, gutterDecorations)),
-            Promise.resolve(editor.setDecorations(dateHideDecorationType, hideDecorations))
-        ]);
+
+        // 批量应用装饰器
+        editor.setDecorations(dateGutterDecorationType, gutterDecorations);
+        editor.setDecorations(dateHideDecorationType, hideDecorations);
     } catch (error) {
         console.error('Error updating decorations:', error);
+        // 出错时清除所有装饰器
+        if (editor) {
+            editor.setDecorations(dateGutterDecorationType, []);
+            editor.setDecorations(dateHideDecorationType, []);
+        }
     }
-}
+}, 100); // 减少防抖时间以提高响应性
 
 // 更新修改行的日期
 async function updateLineDate(editor, line) {
@@ -159,6 +190,11 @@ async function updateLineDate(editor, line) {
 
         const document = editor.document;
         
+        // 检查文件是否启用
+        if (!shouldEnableForFile(document)) {
+            return Promise.resolve();
+        }
+        
         // 检查行号是否有效
         if (line < 0 || line >= document.lineCount) {
             console.log(`Invalid line number: ${line}`);
@@ -166,6 +202,11 @@ async function updateLineDate(editor, line) {
         }
 
         const lineText = document.lineAt(line).text;
+        
+        // 检查前12位是否都是数字
+        if (lineText.length < 12 || !/^\d{12}/.test(lineText)) {
+            return Promise.resolve();
+        }
         const newDate = formatDateToYYMMDD(new Date());
         
         if (lineText.length >= 12) {
@@ -196,9 +237,192 @@ async function updateLineDate(editor, line) {
 /**
  * @param {vscode.ExtensionContext} context
  */
+// 创建 CodeAction 提供器
+class DateGutterActionProvider {
+    provideCodeActions(document, range, context, token) {
+        // 检查文件类型
+        if (!shouldEnableForFile(document)) {
+            return [];
+        }
+
+        // 检查是否有选择的文本
+        if (range.isEmpty) {
+            return [];
+        }
+
+        // 检查选中的行是否包含12位前缀
+        let hasNumberedLine = false;
+        for (let i = range.start.line; i <= range.end.line; i++) {
+            const line = document.lineAt(i);
+            if (line.text.length >= 12 && /^\d{12}/.test(line.text)) {
+                hasNumberedLine = true;
+                break;
+            }
+        }
+
+        // 如果没有包含前缀的行，不显示操作菜单
+        if (!hasNumberedLine) {
+            return [];
+        }
+
+        const actions = [];
+
+        // 创建复制操作（不包含前缀）
+        const copyAction = new vscode.CodeAction(
+            'Copy Selected Lines',
+            vscode.CodeActionKind.RefactorExtract
+        );
+        copyAction.command = {
+            command: 'date-gutter.copyWithoutPrefix',
+            title: 'Copy Selected Lines',
+            tooltip: 'Copy the selected text without the 12-digit prefix'
+        };
+        // 设置操作的适用范围
+        copyAction.isPreferred = false;
+        actions.push(copyAction);
+
+        // 创建删除选中行操作
+        const removePrefixAction = new vscode.CodeAction(
+            'Delete Selected Lines',
+            vscode.CodeActionKind.RefactorRewrite
+        );
+        removePrefixAction.command = {
+            command: 'date-gutter.removePrefixFromSelection',
+            title: 'Delete Selected Lines',
+            tooltip: 'Delete selected lines (including number prefix if present)'
+        };
+        // 设置操作的适用范围
+        removePrefixAction.isPreferred = false;
+        actions.push(removePrefixAction);
+
+        return actions;
+    }
+}
+
 function activate(context) {
+    // 注册 CodeAction 提供器
+    context.subscriptions.push(
+        vscode.languages.registerCodeActionsProvider(
+            [
+                { scheme: 'file' }, // 只适用于本地文件
+                { scheme: 'untitled' } // 也支持未保存的文件
+            ],
+            new DateGutterActionProvider(),
+            {
+                providedCodeActionKinds: [
+                    vscode.CodeActionKind.RefactorExtract,
+                    vscode.CodeActionKind.RefactorRewrite
+                ]
+            }
+        )
+    );
+
+    // 注册删除选中行命令（包括隐藏的前12位和内容）
+    context.subscriptions.push(
+        vscode.commands.registerCommand('date-gutter.removePrefixFromSelection', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !editor.document) return;
+
+            if (!shouldEnableForFile(editor.document)) {
+                return;
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            const document = editor.document;
+            
+            // 收集所有要删除的行，按行号从大到小排序（避免删除影响行号）
+            const linesToDelete = new Set();
+            const linesWithPrefix = new Set(); // 记录有前缀的行
+            
+            for (const selection of editor.selections) {
+                for (let i = selection.start.line; i <= selection.end.line; i++) {
+                    const line = document.lineAt(i);
+                    const text = line.text;
+                    
+                    // 检查是否有12位前缀
+                    if (text.length >= 12 && /^\d{12}/.test(text)) {
+                        linesWithPrefix.add(i);
+                    }
+                    linesToDelete.add(i);
+                }
+            }
+
+            const sortedLines = Array.from(linesToDelete).sort((a, b) => b - a);
+            
+            // 从后往前删除行，避免行号变化影响删除操作
+            for (const lineNum of sortedLines) {
+                const line = document.lineAt(lineNum);
+                const text = line.text;
+                
+                // 如果行有12位前缀，删除整行
+                if (linesWithPrefix.has(lineNum)) {
+                    const range = new vscode.Range(
+                        new vscode.Position(lineNum, 0),
+                        lineNum < document.lineCount - 1 
+                            ? new vscode.Position(lineNum + 1, 0)  // 包括换行符
+                            : new vscode.Position(lineNum, text.length)  // 最后一行
+                    );
+                    edit.delete(document.uri, range);
+                } else {
+                    // 如果行没有12位前缀，也删除整行
+                    const range = new vscode.Range(
+                        new vscode.Position(lineNum, 0),
+                        lineNum < document.lineCount - 1 
+                            ? new vscode.Position(lineNum + 1, 0)  // 包括换行符
+                            : new vscode.Position(lineNum, text.length)  // 最后一行
+                    );
+                    edit.delete(document.uri, range);
+                }
+            }
+
+            if (edit.size > 0) {
+                // 先清除所有装饰器
+                editor.setDecorations(dateGutterDecorationType, []);
+                editor.setDecorations(dateHideDecorationType, []);
+                
+                // 执行删除操作
+                const success = await vscode.workspace.applyEdit(edit);
+                
+                if (success) {
+                    // 强制立即更新装饰器
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
+                    // 只更新装饰器如果编辑器仍然有效
+                    if (editor && editor.document) {
+                        await updateDecorations(editor);
+                    }
+                    
+                    const prefixCount = linesWithPrefix.size;
+                    const totalCount = linesToDelete.size;
+                    
+                    let message = `Deleted ${totalCount} line${totalCount > 1 ? 's' : ''}`;
+                    if (prefixCount > 0) {
+                        message += ` (${prefixCount} with number prefix)`;
+                    }
+                    vscode.window.showInformationMessage(message);
+                }
+            }
+        })
+    );
 
     console.log('date-gutter-extension is now active!');
+
+    // Track editor closing state
+    let isEditorClosing = false;
+
+    // Handle editor close event
+    context.subscriptions.push(
+        vscode.window.onDidChangeVisibleTextEditors(editors => {
+            if (activeEditor && !editors.includes(activeEditor)) {
+                isEditorClosing = true;
+                // Clean up decorations immediately
+                if (activeEditor && dateGutterDecorationType && dateHideDecorationType) {
+                    activeEditor.setDecorations(dateGutterDecorationType, []);
+                    activeEditor.setDecorations(dateHideDecorationType, []);
+                }
+            }
+        })
+    );
 
     // Create decorator types with gutter display configuration
     dateGutterDecorationType = vscode.window.createTextEditorDecorationType({
@@ -213,13 +437,14 @@ function activate(context) {
 
     // Create decorator type for hiding date text while keeping it clickable
     dateHideDecorationType = vscode.window.createTextEditorDecorationType({
-        textDecoration: 'none',
+        textDecoration: 'none; transition: all 0.1s ease-in-out',
         opacity: '0',
         color: 'transparent',
         letterSpacing: '-12ch',  // 压缩字符间距
         position: 'absolute',    // 绝对定位
         width: '0',              // 宽度设为0
         marginRight: '-12ch',    // 负边距补偿
+        backgroundColor: 'transparent',
         before: {
             contentText: '',
             width: '0',
@@ -228,39 +453,82 @@ function activate(context) {
     });
 
     // Handle multi-line selection adjustments
-    vscode.window.onDidChangeTextEditorSelection(event => {
-        if (!event.selections || event.selections.length === 0) return;
-        
-        const editor = event.textEditor;
-        const newSelections = [];
-        let modified = false;
-
-        for (const selection of event.selections) {
-            // Skip if single-line selection or no overlap with prefix area
-            if (selection.isSingleLine || selection.start.character >= 12) {
-                newSelections.push(selection);
-                continue;
-            }
-
-            // Adjust selection to start after 12-character prefix
-            const adjustedStart = new vscode.Position(
-                selection.start.line,
-                Math.max(12, selection.start.character)
-            );
-            const adjustedEnd = selection.end;
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(event => {
+            if (!event.selections || event.selections.length === 0) return;
             
-            if (!adjustedStart.isEqual(selection.start)) {
-                newSelections.push(new vscode.Selection(adjustedStart, adjustedEnd));
-                modified = true;
-            } else {
-                newSelections.push(selection);
-            }
-        }
+            const editor = event.textEditor;
+            if (!editor || !editor.document) return;
 
-        if (modified) {
-            editor.selections = newSelections;
-        }
-    });
+            // 检查文件类型是否启用该功能
+            if (!shouldEnableForFile(editor.document)) return;
+
+            // 检查文件内容是否包含12位前缀的行
+            const hasNumberedLines = editor.document.getText().split('\n').some(line => 
+                line.length >= 12 && /^\d{12}/.test(line)
+            );
+            if (!hasNumberedLines) return;
+
+            const newSelections = [];
+            let modified = false;
+            let activeIndex = -1;
+
+            // 找到活动选择的索引
+            for (let i = 0; i < event.selections.length; i++) {
+                if (event.selections[i].isEqual(editor.selection)) {
+                    activeIndex = i;
+                    break;
+                }
+            }
+
+            for (let i = 0; i < event.selections.length; i++) {
+                const selection = event.selections[i];
+                // Skip if single-line selection or no overlap with prefix area
+                if (selection.isSingleLine || selection.start.character >= 12) {
+                    newSelections.push(selection);
+                    continue;
+                }
+
+                // 检查选择的起始行是否有12位前缀
+                const startLineText = editor.document.lineAt(selection.start.line).text;
+                if (!(startLineText.length >= 12 && /^\d{12}/.test(startLineText))) {
+                    newSelections.push(selection);
+                    continue;
+                }
+
+                // Adjust selection to start after 12-character prefix
+                const adjustedStart = new vscode.Position(
+                    selection.start.line,
+                    Math.max(12, selection.start.character)
+                );
+                const adjustedEnd = selection.end;
+                
+                if (!adjustedStart.isEqual(selection.start)) {
+                    const newSelection = new vscode.Selection(
+                        // 如果这是活动选择，保持原始的活动端和锚点顺序
+                        i === activeIndex && selection.isReversed ? adjustedEnd : adjustedStart,
+                        i === activeIndex && selection.isReversed ? adjustedStart : adjustedEnd
+                    );
+                    newSelections.push(newSelection);
+                    modified = true;
+                } else {
+                    newSelections.push(selection);
+                }
+            }
+
+            if (modified) {
+                // 保持活动选择的索引
+                if (activeIndex !== -1) {
+                    editor.selections = newSelections;
+                    // 确保活动选择保持在原来的位置
+                    const activeSelection = newSelections[activeIndex];
+                    editor.selection = activeSelection;
+                } else {
+                    editor.selections = newSelections;
+                }
+            }
+        })
+    );
 
     // 注册文本编辑器变更事件
     let activeEditor = vscode.window.activeTextEditor;
@@ -296,141 +564,136 @@ function activate(context) {
     );
 
     // 监听文档变化
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(async event => {
-            try {
-                if (activeEditor && event.document === activeEditor.document) {
-                    const newLines = new Set();
-                    const modifiedLines = new Set();
+    let pendingUpdates = new Set();
+    let isUpdating = false;
 
-                    // 分析文本变化
-                    event.contentChanges.forEach(change => {
-                        // 检查是否是新行
-                        const isNewLine = change.text.includes('\n') || 
-                                        change.text.includes('\r\n');
+    const processUpdates = debounce(async () => {
+        if (isUpdating || pendingUpdates.size === 0) return;
+        
+        isUpdating = true;
+        try {
+            if (!activeEditor || !activeEditor.document) return;
+
+            // 检查文件类型是否启用该功能
+            if (!shouldEnableForFile(activeEditor.document)) {
+                pendingUpdates.clear();
+                return;
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            const newDate = formatDateToYYMMDD(new Date());
+            const document = activeEditor.document;
+
+            // 将待更新的行按行号排序
+            const sortedUpdates = Array.from(pendingUpdates)
+                .sort((a, b) => a.number - b.number);
+
+            // 批量处理所有待更新的行
+            for (const line of sortedUpdates) {
+                try {
+                    // 确保行号有效
+                    if (line.number >= 0 && line.number < document.lineCount) {
+                        const lineText = document.lineAt(line.number).text;
                         
-                        // 获取受影响的行
-                        for (let i = change.range.start.line; i <= change.range.end.line; i++) {
-                            modifiedLines.add(i);
-                        }
-
-                        // 如果是新行，记录新行的行号
-                        if (isNewLine) {
-                            const newLineCount = (change.text.match(/\n/g) || []).length;
-                            for (let i = change.range.start.line + 1; 
-                                 i <= change.range.start.line + newLineCount; 
-                                 i++) {
-                                newLines.add(i);
-                            }
-                        }
-                    });
-
-                    // 确保编辑器仍然有效
-                    if (!activeEditor.document || activeEditor.document !== event.document) {
-                        return;
-                    }
-
-                    // 处理新行
-                    if (newLines.size > 0) {
-                        const edit = new vscode.WorkspaceEdit();
-                        const newDate = formatDateToYYMMDD(new Date());
-                        
-                        for (const line of newLines) {
-                            const lineText = activeEditor.document.lineAt(line).text;
-                            // Add 12-digit prefix (6 line number + 6 zeros) if missing
-                            if (lineText.length < 12 || !/^\d{12}/.test(lineText.substr(0, 12))) {
-                                const sequence = generateLineNumber(line);
+                        if (line.isNew) {
+                            // 处理新行
+                            if (lineText.length < 12 || !/^\d{12}/.test(lineText)) {
+                                const sequence = generateLineNumber(line.number);
                                 edit.insert(
-                                    activeEditor.document.uri,
-                                    new vscode.Position(line, 0),
+                                    document.uri,
+                                    new vscode.Position(line.number, 0),
                                     sequence + newDate
                                 );
                             }
-                        }
-                        
-                        await vscode.workspace.applyEdit(edit);
-                    }
-
-                    // 更新修改行的日期
-                    await Promise.all(
-                        Array.from(modifiedLines).map(async line => {
-                            try {
-                                await updateLineDate(activeEditor, line);
-                            } catch (error) {
-                                console.error(`Error updating line ${line}:`, error);
-                            }
-                        })
-                    );
-
-                    // 再次检查编辑器是否仍然有效
-                    if (activeEditor && activeEditor.document) {
-                        await updateDecorations(activeEditor);
-                    }
-                }
-            } catch (error) {
-                console.error('Error in document change handler:', error);
-            }
-        })
-    );
-
-    // 监听文档保存
-    context.subscriptions.push(
-        vscode.workspace.onWillSaveTextDocument(async event => {
-            try {
-                if (activeEditor && event.document === activeEditor.document) {
-                    const document = event.document;
-                    const edit = new vscode.WorkspaceEdit();
-                    let modified = false;
-
-                    for (let i = 0; i < document.lineCount; i++) {
-                        const line = document.lineAt(i);
-                        const text = line.text;
-                        
-                        // Skip empty lines
-                        if (text.trim().length === 0) {
-                            continue;
-                        }
-                        
-                        const needsPrefix = text.length < 12 || !/^\d{12}/.test(text.substr(0, 12));
-                        
-                        if (needsPrefix) {
-                            const sequence = generateLineNumber(i);
-                            const newPrefix = sequence + '000000'; // Fixed 6 zeros as date
-                            
-                            // Replace or insert prefix
-                            if (text.length >= 6 && /^\d{6}/.test(text)) {
+                        } else {
+                            // 更新现有行的日期
+                            if (lineText.length >= 12 && /^\d{12}/.test(lineText)) {
                                 edit.replace(
                                     document.uri,
                                     new vscode.Range(
-                                        new vscode.Position(i, 0),
-                                        new vscode.Position(i, 6)
+                                        new vscode.Position(line.number, 6),
+                                        new vscode.Position(line.number, 12)
                                     ),
-                                    newPrefix
-                                );
-                            } else {
-                                edit.insert(
-                                    document.uri,
-                                    new vscode.Position(i, 0),
-                                    newPrefix
+                                    newDate
                                 );
                             }
-                            modified = true;
                         }
                     }
-                    
-                    // Apply edits if needed
-                    if (modified) {                        
-                        await vscode.workspace.applyEdit(edit);
-                    }
-                    
-                    // Update decorations
-                    await updateDecorations(activeEditor);
+                } catch (error) {
+                    console.error(`Error processing line ${line.number}:`, error);
                 }
-            } catch (error) {
-                console.error('Error in document save handler:', error);
+            }
+
+            // 应用所有编辑
+            if (edit.size > 0) {
+                await vscode.workspace.applyEdit(edit);
+            }
+
+            // 一次性更新所有装饰器
+            await updateDecorations(activeEditor);
+            
+        } catch (error) {
+            console.error('Error in processUpdates:', error);
+        } finally {
+            pendingUpdates.clear();
+            isUpdating = false;
+        }
+    }, 100); // 减少延迟以提高响应性
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument(event => {
+            if (isEditorClosing || !activeEditor || event.document !== activeEditor.document) {
+                return;
+            }
+
+            // 检查文件类型是否启用该功能
+            if (!shouldEnableForFile(event.document)) {
+                return;
+            }
+
+            event.contentChanges.forEach(change => {
+                // 检查是否是新行（通过回车键）
+                const isNewLine = change.text.includes('\n') || change.text.includes('\r\n');
+                
+                // 检查是否是在行尾添加的新行
+                const isEndOfLine = change.range.start.character === event.document.lineAt(change.range.start.line).text.length;
+                
+                // 添加修改的行到待更新集合
+                for (let i = change.range.start.line; i <= change.range.end.line; i++) {
+                    // 检查当前行是否已经有12位前缀
+                    const lineText = event.document.lineAt(i).text;
+                    const hasPrefix = lineText.length >= 12 && /^\d{12}/.test(lineText);
+                    
+                    // 如果行没有前缀，标记为新行
+                    pendingUpdates.add({ 
+                        number: i, 
+                        isNew: !hasPrefix
+                    });
+                }
+
+                // 处理新行
+                if (isNewLine && isEndOfLine) {
+                    const newLineCount = (change.text.match(/\n/g) || []).length;
+                    for (let i = change.range.start.line + 1; i <= change.range.start.line + newLineCount; i++) {
+                        // 检查新行是否在文档范围内
+                        if (i < event.document.lineCount) {
+                            const lineText = event.document.lineAt(i).text;
+                            // 只有当新行没有前缀时才添加
+                            if (!(lineText.length >= 12 && /^\d{12}/.test(lineText))) {
+                                pendingUpdates.add({ number: i, isNew: true });
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 触发批量更新处理
+            if (pendingUpdates.size > 0) {
+                processUpdates();
             }
         })
     );
+   
 
     // 监听配置变化
     context.subscriptions.push(
@@ -447,74 +710,10 @@ function activate(context) {
             }
         })
     );
-
-    // Listen for text document open
+   
+    // Register commands
     context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(async document => {
-            if (shouldEnableForFile(document)) {
-                const editor = vscode.window.activeTextEditor;
-                if (editor && editor.document === document) {
-                    const config = getConfiguration();
-                    
-                    // Only auto-complete if enabled in settings
-                    const autoCompleteEnabled = config.get('autoCompletePrefix', true);
-                    console.log(`Auto-complete prefix enabled: ${autoCompleteEnabled}`);
-                    
-                    if (autoCompleteEnabled) {
-                        // Check and add line numbers if needed
-                        const edit = new vscode.WorkspaceEdit();
-                        let modified = false;
-                        let linesModified = 0;
-
-                        for (let i = 0; i < document.lineCount; i++) {
-                            const line = document.lineAt(i);
-                            const text = line.text;
-
-                            // Skip empty lines
-                            if (text.trim().length === 0) {
-                                console.log(`Skipping empty line ${i}`);
-                                continue;
-                            }
-
-                            const needsPrefix = text.length < 12 || !/^\d{12}/.test(text.substr(0, 12));
-                            console.log(`Line ${i}: needsPrefix=${needsPrefix}, text=${text.substr(0, 12)}...`);
-
-                            if (needsPrefix) {
-                                const lineNumber = generateLineNumber(i);
-                                const newPrefix = lineNumber + '000000'; // Fixed 6 zeros as date
-                                
-                                console.log(`Adding prefix to line ${i}: ${newPrefix}`);
-                                edit.insert(
-                                    document.uri,
-                                    new vscode.Position(i, 0),
-                                    newPrefix
-                                );
-                                modified = true;
-                                linesModified++;
-                            }
-                        }
-
-                        // Apply edits if needed
-                        if (modified) {
-                            console.log(`Applying edits to ${linesModified} lines`);
-                            const editResult = await vscode.workspace.applyEdit(edit);
-                            console.log(`Edit applied successfully: ${editResult}`);
-                            if (!editResult) {
-                                console.error('Failed to apply workspace edit');
-                            }
-                        } else {
-                            console.log('No lines needed prefix updates');
-                        }
-                    }
-                    await updateDecorations(editor);
-                }
-            }
-        })
-    );
-
-    // Register copy without prefix command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('dateGutter.copyWithoutPrefix', copyWithoutPrefix)
+        vscode.commands.registerCommand('date-gutter.copyWithoutPrefix', copyWithoutPrefix)
     );
 
     // Ensure decorator types are properly cleaned up
@@ -535,21 +734,68 @@ function activate(context) {
 // Handle copying text while excluding first 12 digits
 async function copyWithoutPrefix() {
     const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
+    if (!editor || !editor.document) return;
+    
+    // Check if file is enabled
+    if (!shouldEnableForFile(editor.document)) {
+        return;
+    }
 
     let fullText = '';
-    for (const selection of editor.selections) {
-        for (let i = selection.start.line; i <= selection.end.line; i++) {
-            const lineText = editor.document.lineAt(i).text;
-            // Skip first 12 digits if they exist
-            fullText += (lineText.length > 12 && /^\d{12}/.test(lineText) 
-                ? lineText.substring(12) 
-                : lineText) + '\n';
+    let hasSelection = false;
+
+    // 如果有选择的文本，只处理选择的部分
+    if (editor.selections.length > 0 && !editor.selection.isEmpty) {
+        hasSelection = true;
+        for (const selection of editor.selections) {
+            // 处理多行选择
+            if (selection.start.line === selection.end.line) {
+                // 单行选择
+                const line = editor.document.lineAt(selection.start.line);
+                const lineText = line.text;
+                const startChar = selection.start.character;
+                const endChar = selection.end.character;
+
+                // 如果选择包含前12个字符，需要排除它们
+                if (startChar < 12 && lineText.length >= 12 && /^\d{12}/.test(lineText)) {
+                    const adjustedStart = Math.max(12, startChar);
+                    fullText += lineText.substring(adjustedStart, endChar);
+                } else {
+                    fullText += lineText.substring(startChar, endChar);
+                }
+            } else {
+                // 多行选择
+                for (let i = selection.start.line; i <= selection.end.line; i++) {
+                    const line = editor.document.lineAt(i);
+                    const lineText = line.text;
+                    let startChar = (i === selection.start.line) ? selection.start.character : 0;
+                    let endChar = (i === selection.end.line) ? selection.end.character : lineText.length;
+
+                    // 如果这一行以12位数字开头，并且选择包含这些数字，则排除它们
+                    if (startChar < 12 && lineText.length >= 12 && /^\d{12}/.test(lineText)) {
+                        startChar = Math.max(12, startChar);
+                    }
+
+                    fullText += lineText.substring(startChar, endChar);
+                    if (i < selection.end.line) fullText += '\n';
+                }
+            }
+        }
+    } else {
+        // 如果没有选择，处理整个文档或当前行
+        const currentLine = editor.selection.active.line;
+        const lineText = editor.document.lineAt(currentLine).text;
+        
+        // 如果当前行以12位数字开头，排除它们
+        if (lineText.length >= 12 && /^\d{12}/.test(lineText)) {
+            fullText = lineText.substring(12);
+        } else {
+            fullText = lineText;
         }
     }
     
-    await vscode.env.clipboard.writeText(fullText.trim());
-    vscode.window.showInformationMessage('Copied (excluding prefix numbers)');
+    await vscode.env.clipboard.writeText(fullText);
+    vscode.window.showInformationMessage('Copied text (excluding prefix numbers)');
 }
 
 function deactivate() {

@@ -1,7 +1,6 @@
 # Date Gutter for IBMi
 
-A Visual Studio Code extension that displays dates in the editor gutter, specifically designed for IBMi source files. It makes it easy to track and manage dated entries in your IBMi development files. 
-IBMi source files use date to keep track changes, RTC download source contains the date information. This extension formats the download source dates in a way that is same as STRSEU in IBMi system.
+A Visual Studio Code extension that displays dates in the editor gutter, specifically designed for IBMi source files containing the source sequence and date information. This extension formats the download source dates in gutter information, while preserving the original text formatting. This extension also provides quick access to common operations through the Code Actions menu (light bulb) and the gutter menu.
 
 ## Features
 
@@ -18,6 +17,14 @@ IBMi source files use date to keep track changes, RTC download source contains t
   - Automatically excludes prefix numbers when copying (Ctrl+C)
   - Works with both single and multi-line selections
   - Preserves original text formatting
+- **Code Actions** (Light Bulb Menu):
+  - Appears when text is selected
+  - **Copy without prefix**: Copy selected text excluding 12-digit prefix
+  - **Delete Selected Lines**: Remove selected lines completely
+    * Removes entire line content
+    * Includes hidden 12-digit prefix
+    * Cleans up gutter date display
+  - Works with multi-line selections
 - **Gutter Menu**:
   - Clickable gutter icons for quick line operations
   - Copy line content to clipboard
@@ -39,8 +46,36 @@ IBMi source files use date to keep track changes, RTC download source contains t
 
 ### Commands
 
-- `Date Gutter: Insert Date`: Inserts current date at cursor position
-- `Date Gutter: Update Line Date`: Updates the date at the beginning of the current line to today's date
+The extension provides the following commands that can be accessed through the Command Palette (Ctrl+Shift+P):
+
+- `Date Gutter: Copy Selected Lines`: Copies selected text without the 12-digit prefix
+- `Date Gutter: Delete Selected Lines`: Deletes selected lines completely (including prefix and gutter dates)
+
+### Code Actions Menu
+
+The extension provides quick access to operations through the Code Actions menu (light bulb):
+
+1. **Accessing the Menu**:
+   - Select one or more lines in the editor
+   - Look for the light bulb icon that appears
+   - Click the light bulb to open the actions menu
+
+2. **Available Operations**:
+   - **Copy Selected Lines**: 
+     * Copies selected text to clipboard
+     * Automatically excludes 12-digit prefix
+     * Preserves all other formatting
+   - **Delete Selected Lines**:
+     * Removes selected lines completely
+     * Includes hidden 12-digit prefix
+     * Removes gutter date display
+     * Works with multiple selections
+
+3. **Tips**:
+   - Available for all supported IBMi file types
+   - Works with single or multiple line selections
+   - Operations are immediate and cannot be undone
+   - Use with caution, especially the delete operation
 
 ### Gutter Menu
 
@@ -94,9 +129,7 @@ Example settings.json to add custom file types:
         ".lf",
         ".cmd",
         ".bnd",
-        ".srvpgm",
-        ".txt",
-        ".log"
+        ".srvpgm"
     ]
 }
 ```
@@ -148,6 +181,19 @@ None at this time.
 ## Contributing
 
 Feel free to submit issues and enhancement requests on our GitHub repository.
+
+### Running Tests
+
+To run the tests:
+
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Run tests: `npm test`
+
+For development:
+- Use `npm run test:watch` to run tests in watch mode
+- Tests are located in the `test` directory
+- Test fixtures are in `test/fixtures`
 
 ## License
 
