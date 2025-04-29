@@ -11,39 +11,55 @@ function getConfiguration() {
 
 // Check if date decorator should be enabled for the file
 function shouldEnableForFile(document) {
-    const config = getConfiguration();
-    
-    // Check if extension is enabled
-    if (!config.get('enabled', true)) {
+    try {
+        const config = getConfiguration();
+        
+        // Check if extension is enabled
+        if (!config.get('enabled', true)) {
+            console.log('Extension is disabled in settings');
+            return false;
+        }
+
+        // Enable for local files, untitled files, and git diff views
+        const supportedSchemes = ['file', 'untitled', 'git', 'gitfs'];
+        if (!supportedSchemes.includes(document.uri.scheme)) {
+            console.log(`Unsupported scheme: ${document.uri.scheme}`);
+            return false;
+        }
+
+        // Check if opened in codefori object browser
+        if (document.uri.scheme === 'objectBrowser' || 
+            document.uri.scheme === 'member' || 
+            document.uri.scheme === 'streamfile' ||
+            document.uri.path.startsWith('/IBMi/')) {
+            console.log('File is in IBMi object browser');
+            return false;
+        }
+
+        // Default supported IBMi file types
+        const defaultFileTypes = ['.rpgle', '.sqlrpgle', '.clle', '.dds', '.pf', '.lf'];
+        
+        // Get enabled file types (convert all to lowercase for comparison)
+        const enabledFileTypes = config.get('enabledFileTypes', defaultFileTypes)
+            .map(ext => ext.toLowerCase().trim());
+        
+        // Check if file extension is in enabled list (case insensitive)
+        const fileName = document.fileName.toLowerCase();
+        const fileExtensions = enabledFileTypes.map(ext => ext.replace('.', ''));
+        
+        // Check for any matching extension
+        const hasValidExtension = fileExtensions.some(ext => fileName.endsWith(ext));
+        
+        if (!hasValidExtension) {
+            console.log(`File extension not supported: ${fileName}`);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error in shouldEnableForFile:', error);
         return false;
     }
-
-    // Enable only for local files
-    if (document.uri.scheme !== 'file') {
-        return false;
-    }
-
-    // Check if opened in codefori object browser
-    if (document.uri.scheme === 'objectBrowser' || 
-        document.uri.scheme === 'member' || 
-        document.uri.scheme === 'streamfile' ||
-        document.uri.path.startsWith('/IBMi/')) {
-        return false;
-    }
-
-    // Default supported IBMi file types
-    const defaultFileTypes = ['.rpgle', '.sqlrpgle', '.clle', '.dds', '.pf', '.lf'];
-    
-    // Get enabled file types (convert all to lowercase for comparison)
-    const enabledFileTypes = config.get('enabledFileTypes', defaultFileTypes)
-        .map(ext => ext.toLowerCase());
-    
-    // Check if file extension is in enabled list (case insensitive)
-    const fileNameParts = document.fileName.split('.');
-    if (fileNameParts.length < 2) return false; // No extension
-    
-    const fileExtension = '.' + fileNameParts.pop().toLowerCase();
-    return enabledFileTypes.some(ext => ext === fileExtension);
 }
 
 // Format Date YYMMDD
@@ -106,7 +122,6 @@ function debounce(func, wait) {
 const updateDecorations = debounce(async (editor) => {
     try {
         if (!editor || !editor.document || !dateGutterDecorationType || !dateHideDecorationType) {
-            // 如果编辑器无效，清除所有装饰器
             if (editor) {
                 editor.setDecorations(dateGutterDecorationType, []);
                 editor.setDecorations(dateHideDecorationType, []);
@@ -116,14 +131,12 @@ const updateDecorations = debounce(async (editor) => {
 
         const document = editor.document;
         
-        // 检查文件类型是否启用该功能
         if (!shouldEnableForFile(document)) {
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
             return;
         }
 
-        // 检查文档是否还有内容
         if (document.lineCount === 0) {
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
@@ -134,15 +147,19 @@ const updateDecorations = debounce(async (editor) => {
         const hideDecorations = [];
         const visibleRanges = editor.visibleRanges;
         
-        // 如果没有可见范围，使用整个文档
-        const rangesToProcess = visibleRanges.length > 0 
-            ? visibleRanges 
-            : [new vscode.Range(0, 0, document.lineCount - 1, 0)];
+        // 只处理可见范围（Git视图或普通视图）
+        const rangesToProcess = (document.uri.scheme === 'git' || document.uri.scheme === 'gitfs')
+            ? visibleRanges.filter(range => 
+                range.start.line >= 0 && range.end.line < document.lineCount)
+            : visibleRanges.length > 0 
+                ? visibleRanges 
+                : [new vscode.Range(0, 0, document.lineCount - 1, 0)];
 
+        // 批量处理可见行
         for (const range of rangesToProcess) {
-            const startLine = range.start.line;
-            const endLine = range.end.line;
-
+            const startLine = Math.max(0, range.start.line);
+            const endLine = Math.min(document.lineCount - 1, range.end.line);
+            
             for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
                 try {
                     const line = document.lineAt(lineNum);
@@ -168,24 +185,22 @@ const updateDecorations = debounce(async (editor) => {
                         hideDecorations.push({ range: decorationRange });
                     }
                 } catch (error) {
-                    // 如果行不存在（可能被删除），跳过
                     continue;
                 }
             }
         }
 
-        // 批量应用装饰器
+        // 立即应用装饰器
         editor.setDecorations(dateGutterDecorationType, gutterDecorations);
         editor.setDecorations(dateHideDecorationType, hideDecorations);
     } catch (error) {
         console.error('Error updating decorations:', error);
-        // 出错时清除所有装饰器
         if (editor) {
             editor.setDecorations(dateGutterDecorationType, []);
             editor.setDecorations(dateHideDecorationType, []);
         }
     }
-}, 100); // 减少防抖时间以提高响应性
+}, 50); // 进一步减少防抖时间以改善滚动体验
 
 // 更新修改行的日期
 async function updateLineDate(editor, line) {
@@ -307,12 +322,14 @@ class DateGutterActionProvider {
 }
 
 function activate(context) {
-    // 注册 CodeAction 提供器
+    // 注册 CodeAction 提供器（支持Git差异视图）
     context.subscriptions.push(
         vscode.languages.registerCodeActionsProvider(
             [
-                { scheme: 'file' }, // 只适用于本地文件
-                { scheme: 'untitled' } // 也支持未保存的文件
+                { scheme: 'file' },    // 本地文件
+                { scheme: 'untitled' }, // 未保存的文件
+                { scheme: 'git' },      // Git差异视图
+                { scheme: 'gitfs' }     // Git差异视图
             ],
             new DateGutterActionProvider(),
             {
@@ -417,16 +434,35 @@ function activate(context) {
     // Track editor closing state
     let isEditorClosing = false;
 
-    // Handle editor close event
+    // Handle editor close and switch events
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors(editors => {
-            if (activeEditor && !editors.includes(activeEditor)) {
-                isEditorClosing = true;
-                // Clean up decorations immediately
-                if (activeEditor && dateGutterDecorationType && dateHideDecorationType) {
-                    activeEditor.setDecorations(dateGutterDecorationType, []);
-                    activeEditor.setDecorations(dateHideDecorationType, []);
+            try {
+                const wasActiveEditorClosed = activeEditor && !editors.includes(activeEditor);
+                const isNewEditorActive = editors.length > 0 && editors[0] !== activeEditor;
+                
+                if (wasActiveEditorClosed) {
+                    isEditorClosing = true;
+                    // Clean up decorations immediately
+                    if (activeEditor && dateGutterDecorationType && dateHideDecorationType) {
+                        activeEditor.setDecorations(dateGutterDecorationType, []);
+                        activeEditor.setDecorations(dateHideDecorationType, []);
+                    }
                 }
+                
+                // Reset closing flag if new editor is active
+                if (isNewEditorActive) {
+                    isEditorClosing = false;
+                }
+                
+                // Update decorations for newly visible editors
+                editors.forEach(async editor => {
+                    if (editor !== activeEditor) {
+                        await updateDecorations(editor);
+                    }
+                });
+            } catch (error) {
+                console.error('Error in editor visibility change handler:', error);
             }
         })
     );
@@ -556,7 +592,7 @@ function activate(context) {
         }
     });
 
-    // 监听活动编辑器变化和可见范围变化
+    // 监听活动编辑器变化
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async editor => {
             try {
@@ -567,14 +603,64 @@ function activate(context) {
             } catch (error) {
                 console.error('Error in editor change handler:', error);
             }
-        }),
+        })
+    );
+
+    // 监听可见范围变化（优化滚动性能）
+    context.subscriptions.push(
         vscode.window.onDidChangeTextEditorVisibleRanges(async event => {
             try {
                 if (isEditorClosing || !activeEditor || event.textEditor !== activeEditor) {
                     return;
                 }
-                // 立即更新可见区域的装饰器
-                await updateDecorations(activeEditor);
+                
+                // 立即更新可见区域的装饰器（跳过防抖）
+                const document = activeEditor.document;
+                if (!document || !shouldEnableForFile(document)) {
+                    return;
+                }
+
+                const gutterDecorations = [];
+                const hideDecorations = [];
+                
+                // 只处理当前可见范围
+                for (const range of event.visibleRanges) {
+                    const startLine = Math.max(0, range.start.line);
+                    const endLine = Math.min(document.lineCount - 1, range.end.line);
+                    
+                    for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
+                        try {
+                            const line = document.lineAt(lineNum);
+                            const text = line.text;
+                            
+                            if (text.length >= 12 && /^\d{12}/.test(text)) {
+                                const dateStr = text.slice(6, 12);
+                                const decorationRange = new vscode.Range(
+                                    new vscode.Position(lineNum, 0),
+                                    new vscode.Position(lineNum, 12)
+                                );
+
+                                gutterDecorations.push({
+                                    range: line.range,
+                                    renderOptions: {
+                                        before: {
+                                            contentText: dateStr,
+                                            color: '#888888',
+                                            margin: '0 10px 0 0'
+                                        }
+                                    }
+                                });
+                                hideDecorations.push({ range: decorationRange });
+                            }
+                        } catch (error) {
+                            continue;
+                        }
+                    }
+                }
+
+                // 立即应用装饰器（不等待防抖）
+                activeEditor.setDecorations(dateGutterDecorationType, gutterDecorations);
+                activeEditor.setDecorations(dateHideDecorationType, hideDecorations);
             } catch (error) {
                 console.error('Error in visible ranges change handler:', error);
             }
@@ -590,64 +676,62 @@ function activate(context) {
         
         isUpdating = true;
         try {
-            if (!activeEditor || !activeEditor.document) return;
-
-            // 检查文件类型是否启用该功能
+            if (!activeEditor || !activeEditor.document) {
+                pendingUpdates.clear();
+                return;
+            }
+    
+            // Verify file type
             if (!shouldEnableForFile(activeEditor.document)) {
                 pendingUpdates.clear();
                 return;
             }
-
+    
             const edit = new vscode.WorkspaceEdit();
             const newDate = formatDateToYYMMDD(new Date());
             const document = activeEditor.document;
-
-            // 将待更新的行按行号排序
+    
+            // Process updates in order
             const sortedUpdates = Array.from(pendingUpdates)
                 .sort((a, b) => a.number - b.number);
-
-            // 批量处理所有待更新的行
+    
             for (const line of sortedUpdates) {
                 try {
-                    // 确保行号有效
                     if (line.number >= 0 && line.number < document.lineCount) {
                         const lineText = document.lineAt(line.number).text;
                         
-                        if (line.isNew) {
-                            // 处理新行
-                            if (lineText.length < 12 || !/^\d{12}/.test(lineText)) {
-                                const sequence = generateLineNumber(line.number);
-                                edit.insert(
-                                    document.uri,
-                                    new vscode.Position(line.number, 0),
-                                    sequence + newDate
-                                );
-                            }
-                        } else {
-                            // 更新现有行的日期
-                            if (lineText.length >= 12 && /^\d{12}/.test(lineText)) {
-                                edit.replace(
-                                    document.uri,
-                                    new vscode.Range(
-                                        new vscode.Position(line.number, 6),
-                                        new vscode.Position(line.number, 12)
-                                    ),
-                                    newDate
-                                );
-                            }
+                        if (line.needsPrefix && (line.isNew || lineText.length < 12 || !/^\d{12}/.test(lineText))) {
+                            const sequence = generateLineNumber(line.number);
+                            edit.insert(
+                                document.uri,
+                                new vscode.Position(line.number, 0),
+                                sequence + newDate
+                            );
+                        } else if (!line.isNew && lineText.length >= 12 && /^\d{12}/.test(lineText)) {
+                            edit.replace(
+                                document.uri,
+                                new vscode.Range(
+                                    new vscode.Position(line.number, 6),
+                                    new vscode.Position(line.number, 12)
+                                ),
+                                newDate
+                            );
                         }
                     }
                 } catch (error) {
                     console.error(`Error processing line ${line.number}:`, error);
                 }
             }
-
-            // 应用所有编辑
+    
+            // Apply all edits
             if (edit.size > 0) {
-                await vscode.workspace.applyEdit(edit);
+                const success = await vscode.workspace.applyEdit(edit);
+                if (!success) {
+                    console.error('Failed to apply workspace edits');
+                }
             }
-
-            // 一次性更新所有装饰器
+    
+            // Update decorations
             await updateDecorations(activeEditor);
             
         } catch (error) {
@@ -656,58 +740,81 @@ function activate(context) {
             pendingUpdates.clear();
             isUpdating = false;
         }
-    }, 100); // 减少延迟以提高响应性
+    }, 100);
 
     context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(event => {
-            if (isEditorClosing || !activeEditor || event.document !== activeEditor.document) {
-                return;
-            }
-
-            // 检查文件类型是否启用该功能
-            if (!shouldEnableForFile(event.document)) {
-                return;
-            }
-
-            event.contentChanges.forEach(change => {
-                // 检查是否是新行（通过回车键）
-                const isNewLine = change.text.includes('\n') || change.text.includes('\r\n');
-                
-                // 检查是否是在行尾添加的新行
-                const isEndOfLine = change.range.start.character === event.document.lineAt(change.range.start.line).text.length;
-                
-                // 添加修改的行到待更新集合
-                for (let i = change.range.start.line; i <= change.range.end.line; i++) {
-                    // 检查当前行是否已经有12位前缀
-                    const lineText = event.document.lineAt(i).text;
-                    const hasPrefix = lineText.length >= 12 && /^\d{12}/.test(lineText);
-                    
-                    // 如果行没有前缀，标记为新行
-                    pendingUpdates.add({ 
-                        number: i, 
-                        isNew: !hasPrefix
-                    });
+        vscode.workspace.onDidChangeTextDocument(async event => {
+            try {
+                if (isEditorClosing || !activeEditor || event.document !== activeEditor.document) {
+                    return;
                 }
-
-                // 处理新行
-                if (isNewLine && isEndOfLine) {
-                    const newLineCount = (change.text.match(/\n/g) || []).length;
-                    for (let i = change.range.start.line + 1; i <= change.range.start.line + newLineCount; i++) {
-                        // 检查新行是否在文档范围内
-                        if (i < event.document.lineCount) {
-                            const lineText = event.document.lineAt(i).text;
-                            // 只有当新行没有前缀时才添加
-                            if (!(lineText.length >= 12 && /^\d{12}/.test(lineText))) {
-                                pendingUpdates.add({ number: i, isNew: true });
+    
+                // Verify document is still valid
+                if (!event.document || event.document.isClosed) {
+                    pendingUpdates.clear();
+                    return;
+                }
+    
+                // Check if file type is enabled
+                if (!shouldEnableForFile(event.document)) {
+                    pendingUpdates.clear();
+                    return;
+                }
+    
+                // Process each content change
+                event.contentChanges.forEach(change => {
+                    try {
+                        const isNewLine = change.text.includes('\n') || change.text.includes('\r\n');
+                        const isEndOfLine = change.range.start.character === 
+                            event.document.lineAt(change.range.start.line).text.length;
+    
+                        // Add modified lines to pending updates
+                        for (let i = change.range.start.line; i <= change.range.end.line; i++) {
+                            try {
+                                const lineText = event.document.lineAt(i).text;
+                                const hasPrefix = lineText.length >= 12 && /^\d{12}/.test(lineText);
+                                
+                                pendingUpdates.add({ 
+                                    number: i, 
+                                    isNew: !hasPrefix,
+                                    needsPrefix: !hasPrefix && shouldEnableForFile(event.document)
+                                });
+                            } catch (error) {
+                                console.error(`Error processing line ${i}:`, error);
                             }
                         }
+    
+                        // Handle new lines
+                        if (isNewLine && isEndOfLine) {
+                            const newLineCount = (change.text.match(/\n/g) || []).length;
+                            for (let i = change.range.start.line + 1; i <= change.range.start.line + newLineCount; i++) {
+                                if (i < event.document.lineCount) {
+                                    try {
+                                        const lineText = event.document.lineAt(i).text;
+                                        if (!(lineText.length >= 12 && /^\d{12}/.test(lineText))) {
+                                            pendingUpdates.add({ 
+                                                number: i, 
+                                                isNew: true,
+                                                needsPrefix: shouldEnableForFile(event.document)
+                                            });
+                                        }
+                                    } catch (error) {
+                                        console.error(`Error processing new line ${i}:`, error);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error processing content change:', error);
                     }
+                });
+    
+                // Trigger batch processing
+                if (pendingUpdates.size > 0) {
+                    await processUpdates();
                 }
-            });
-
-            // 触发批量更新处理
-            if (pendingUpdates.size > 0) {
-                processUpdates();
+            } catch (error) {
+                console.error('Error in document change handler:', error);
             }
         })
     );
@@ -745,8 +852,23 @@ function activate(context) {
                 dateHideDecorationType.dispose();
                 dateHideDecorationType = undefined;
             }
+            // Reset all state on deactivation
+            isEditorClosing = false;
+            activeEditor = undefined;
+            pendingUpdates.clear();
         }
     });
+    
+    // Add periodic state validation
+    setInterval(() => {
+        if (activeEditor && !vscode.window.visibleTextEditors.includes(activeEditor)) {
+            console.log('Cleaning up stale editor reference');
+            activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor) {
+                updateDecorations(activeEditor);
+            }
+        }
+    }, 30000); // Check every 30 seconds
 }
 
 // Handle copying text while excluding first 12 digits
