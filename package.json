@@ -3,7 +3,7 @@
   "publisher": "zhuojia-he",
   "displayName": "Date Gutter for IBMi",
   "description": "Display and update YYMMDD dates in the gutter for IBMi source files",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/hezjia/date-gutter-ibmi.git"
@@ -58,7 +58,7 @@
             ".bnd",
             ".srvpgm"
           ],
-          "description": "File extensions where date gutter should be enabled. Default includes IBMi source types"
+          "description": "File extensions where date gutter should be enabled (case insensitive). Default includes RPGLE, SQLRPGLE, CLLE and other IBMi source types"
         }
       }
     }

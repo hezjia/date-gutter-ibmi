@@ -31,12 +31,19 @@ function shouldEnableForFile(document) {
         return false;
     }
 
-    // Get enabled file types
-    const enabledFileTypes = config.get('enabledFileTypes', ['.txt', '.md']);
+    // Default supported IBMi file types
+    const defaultFileTypes = ['.rpgle', '.sqlrpgle', '.clle', '.dds', '.pf', '.lf'];
     
-    // Check if file extension is in enabled list
-    const fileExtension = '.' + document.fileName.split('.').pop().toLowerCase();
-    return enabledFileTypes.includes(fileExtension);
+    // Get enabled file types (convert all to lowercase for comparison)
+    const enabledFileTypes = config.get('enabledFileTypes', defaultFileTypes)
+        .map(ext => ext.toLowerCase());
+    
+    // Check if file extension is in enabled list (case insensitive)
+    const fileNameParts = document.fileName.split('.');
+    if (fileNameParts.length < 2) return false; // No extension
+    
+    const fileExtension = '.' + fileNameParts.pop().toLowerCase();
+    return enabledFileTypes.some(ext => ext === fileExtension);
 }
 
 // Format Date YYMMDD
@@ -549,7 +556,7 @@ function activate(context) {
         }
     });
 
-    // 监听活动编辑器变化
+    // 监听活动编辑器变化和可见范围变化
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async editor => {
             try {
@@ -559,6 +566,17 @@ function activate(context) {
                 }
             } catch (error) {
                 console.error('Error in editor change handler:', error);
+            }
+        }),
+        vscode.window.onDidChangeTextEditorVisibleRanges(async event => {
+            try {
+                if (isEditorClosing || !activeEditor || event.textEditor !== activeEditor) {
+                    return;
+                }
+                // 立即更新可见区域的装饰器
+                await updateDecorations(activeEditor);
+            } catch (error) {
+                console.error('Error in visible ranges change handler:', error);
             }
         })
     );
@@ -742,11 +760,9 @@ async function copyWithoutPrefix() {
     }
 
     let fullText = '';
-    let hasSelection = false;
 
-    // 如果有选择的文本，只处理选择的部分
+    // 处理选择的文本（如果有的话）
     if (editor.selections.length > 0 && !editor.selection.isEmpty) {
-        hasSelection = true;
         for (const selection of editor.selections) {
             // 处理多行选择
             if (selection.start.line === selection.end.line) {
@@ -782,7 +798,7 @@ async function copyWithoutPrefix() {
             }
         }
     } else {
-        // 如果没有选择，处理整个文档或当前行
+        // 如果没有选择，处理当前行
         const currentLine = editor.selection.active.line;
         const lineText = editor.document.lineAt(currentLine).text;
         
