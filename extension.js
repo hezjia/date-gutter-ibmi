@@ -12,46 +12,55 @@ function getConfiguration() {
 // Check if date decorator should be enabled for the file
 function shouldEnableForFile(document) {
     try {
+        // Double-check document exists
+        if (!document || !document.fileName) {
+            console.log('Invalid document object');
+            return false;
+        }
+
         const config = getConfiguration();
         
-        // Check if extension is enabled
+        // Strict check if extension is enabled
         if (!config.get('enabled', true)) {
             console.log('Extension is disabled in settings');
             return false;
         }
 
-        // Enable for local files, untitled files, and git diff views
+        // Strict scheme checking
         const supportedSchemes = ['file', 'untitled', 'git', 'gitfs'];
         if (!supportedSchemes.includes(document.uri.scheme)) {
             console.log(`Unsupported scheme: ${document.uri.scheme}`);
             return false;
         }
 
-        // Check if opened in codefori object browser
+        // Explicit IBMi object browser check
         if (document.uri.scheme === 'objectBrowser' || 
             document.uri.scheme === 'member' || 
             document.uri.scheme === 'streamfile' ||
-            document.uri.path.startsWith('/IBMi/')) {
+            (document.uri.path && document.uri.path.startsWith('/IBMi/'))) {
             console.log('File is in IBMi object browser');
             return false;
         }
 
-        // Default supported IBMi file types
+        // Get enabled file types with strict validation
         const defaultFileTypes = ['.rpgle', '.sqlrpgle', '.clle', '.dds', '.pf', '.lf'];
-        
-        // Get enabled file types (convert all to lowercase for comparison)
         const enabledFileTypes = config.get('enabledFileTypes', defaultFileTypes)
-            .map(ext => ext.toLowerCase().trim());
-        
-        // Check if file extension is in enabled list (case insensitive)
+            .map(ext => ext.toLowerCase().trim())
+            .filter(ext => ext.startsWith('.')); // Ensure proper extensions
+
+        // Strict file extension check
         const fileName = document.fileName.toLowerCase();
-        const fileExtensions = enabledFileTypes.map(ext => ext.replace('.', ''));
+        const lastDotIndex = fileName.lastIndexOf('.');
+        if (lastDotIndex === -1) {
+            console.log('File has no extension');
+            return false;
+        }
+
+        const fileExt = fileName.slice(lastDotIndex);
+        const isEnabled = enabledFileTypes.includes(fileExt);
         
-        // Check for any matching extension
-        const hasValidExtension = fileExtensions.some(ext => fileName.endsWith(ext));
-        
-        if (!hasValidExtension) {
-            console.log(`File extension not supported: ${fileName}`);
+        if (!isEnabled) {
+            console.log(`File extension not supported: ${fileExt}`);
             return false;
         }
         
@@ -304,18 +313,32 @@ class DateGutterActionProvider {
         actions.push(copyAction);
 
         // 创建删除选中行操作
-        const removePrefixAction = new vscode.CodeAction(
+        const removeLinesAction = new vscode.CodeAction(
             'Delete Selected Lines',
             vscode.CodeActionKind.RefactorRewrite
         );
-        removePrefixAction.command = {
-            command: 'date-gutter.removePrefixFromSelection',
+        removeLinesAction.command = {
+            command: 'date-gutter.removeLinesFromSelection',
             title: 'Delete Selected Lines',
             tooltip: 'Delete selected lines (including number prefix if present)'
         };
         // 设置操作的适用范围
-        removePrefixAction.isPreferred = false;
-        actions.push(removePrefixAction);
+        removeLinesAction.isPreferred = false;
+        actions.push(removeLinesAction);
+
+        // 创建添加前缀操作
+        const addPrefixAction = new vscode.CodeAction(
+            'Add Line Number Prefix',
+            vscode.CodeActionKind.RefactorRewrite
+        );
+        addPrefixAction.command = {
+            command: 'date-gutter.addPrefixToSelection',
+            title: 'Add Line Number Prefix',
+            tooltip: 'Add 12-digit prefix (6-digit line number + 6 zeros) to selected lines'
+        };
+        // 设置操作的适用范围
+        addPrefixAction.isPreferred = false;
+        actions.push(addPrefixAction);
 
         return actions;
     }
@@ -343,7 +366,7 @@ function activate(context) {
 
     // 注册删除选中行命令（包括隐藏的前12位和内容）
     context.subscriptions.push(
-        vscode.commands.registerCommand('date-gutter.removePrefixFromSelection', async () => {
+        vscode.commands.registerCommand('date-gutter.removeLinesFromSelection', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || !editor.document) return;
 
@@ -749,15 +772,30 @@ function activate(context) {
                     return;
                 }
     
-                // Verify document is still valid
-                if (!event.document || event.document.isClosed) {
+                // Strict document validation
+                if (!event.document || event.document.isClosed || !event.document.fileName) {
                     pendingUpdates.clear();
                     return;
                 }
     
-                // Check if file type is enabled
-                if (!shouldEnableForFile(event.document)) {
+                // Strict file type check with additional validation
+                if (!shouldEnableForFile(event.document) || 
+                    !event.document.uri || 
+                    !['file', 'untitled'].includes(event.document.uri.scheme)) {
                     pendingUpdates.clear();
+                    return;
+                }
+    
+                // Additional check to prevent Copilot interference
+                const isCopilotEdit = event.contentChanges.some(change => 
+                    change.text.includes('\n') && 
+                    change.text.trim().length > 0 &&
+                    change.range.start.character === 0 &&
+                    change.range.end.character === 0
+                );
+                
+                if (isCopilotEdit) {
+                    console.log('Detected potential Copilot edit - skipping');
                     return;
                 }
     
@@ -767,25 +805,12 @@ function activate(context) {
                         const isNewLine = change.text.includes('\n') || change.text.includes('\r\n');
                         const isEndOfLine = change.range.start.character === 
                             event.document.lineAt(change.range.start.line).text.length;
+                        const isPureNewline = (change.text === '\n' || change.text === '\r\n') && 
+                            change.rangeLength === 0;
     
-                        // Add modified lines to pending updates
-                        for (let i = change.range.start.line; i <= change.range.end.line; i++) {
-                            try {
-                                const lineText = event.document.lineAt(i).text;
-                                const hasPrefix = lineText.length >= 12 && /^\d{12}/.test(lineText);
-                                
-                                pendingUpdates.add({ 
-                                    number: i, 
-                                    isNew: !hasPrefix,
-                                    needsPrefix: !hasPrefix && shouldEnableForFile(event.document)
-                                });
-                            } catch (error) {
-                                console.error(`Error processing line ${i}:`, error);
-                            }
-                        }
-    
-                        // Handle new lines
-                        if (isNewLine && isEndOfLine) {
+                        // Special case: pure newline at end of line (Enter key pressed)
+                        if (isNewLine && isEndOfLine && isPureNewline) {
+                            // Only process the new lines, not the current line
                             const newLineCount = (change.text.match(/\n/g) || []).length;
                             for (let i = change.range.start.line + 1; i <= change.range.start.line + newLineCount; i++) {
                                 if (i < event.document.lineCount) {
@@ -800,6 +825,43 @@ function activate(context) {
                                         }
                                     } catch (error) {
                                         console.error(`Error processing new line ${i}:`, error);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Normal case: process all modified lines
+                            for (let i = change.range.start.line; i <= change.range.end.line; i++) {
+                                try {
+                                    const lineText = event.document.lineAt(i).text;
+                                    const hasPrefix = lineText.length >= 12 && /^\d{12}/.test(lineText);
+                                    
+                                    pendingUpdates.add({ 
+                                        number: i, 
+                                        isNew: !hasPrefix,
+                                        needsPrefix: !hasPrefix && shouldEnableForFile(event.document)
+                                    });
+                                } catch (error) {
+                                    console.error(`Error processing line ${i}:`, error);
+                                }
+                            }
+    
+                            // Handle new lines in normal case
+                            if (isNewLine) {
+                                const newLineCount = (change.text.match(/\n/g) || []).length;
+                                for (let i = change.range.start.line + 1; i <= change.range.start.line + newLineCount; i++) {
+                                    if (i < event.document.lineCount) {
+                                        try {
+                                            const lineText = event.document.lineAt(i).text;
+                                            if (!(lineText.length >= 12 && /^\d{12}/.test(lineText))) {
+                                                pendingUpdates.add({ 
+                                                    number: i, 
+                                                    isNew: true,
+                                                    needsPrefix: shouldEnableForFile(event.document)
+                                                });
+                                            }
+                                        } catch (error) {
+                                            console.error(`Error processing new line ${i}:`, error);
+                                        }
                                     }
                                 }
                             }
@@ -839,6 +901,65 @@ function activate(context) {
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('date-gutter.copyWithoutPrefix', copyWithoutPrefix)
+    );
+
+    // 注册添加前缀命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('date-gutter.addPrefixToSelection', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !editor.document) return;
+
+            if (!shouldEnableForFile(editor.document)) {
+                return;
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            const document = editor.document;
+            const newDate = "000000"; // 6位全0作为日期部分
+            
+            // 收集所有要添加前缀的行
+            const linesToAddPrefix = new Set();
+            
+            for (const selection of editor.selections) {
+                for (let i = selection.start.line; i <= selection.end.line; i++) {
+                    const line = document.lineAt(i);
+                    const text = line.text;
+                    
+                    // 只对没有12位前缀的行添加前缀
+                    if (!(text.length >= 12 && /^\d{12}/.test(text))) {
+                        linesToAddPrefix.add(i);
+                    }
+                }
+            }
+
+            // 按行号排序
+            const sortedLines = Array.from(linesToAddPrefix).sort((a, b) => a - b);
+            
+            // 添加前缀
+            for (const lineNum of sortedLines) {
+                const sequence = generateLineNumber(lineNum);
+                edit.insert(
+                    document.uri,
+                    new vscode.Position(lineNum, 0),
+                    sequence + newDate
+                );
+            }
+
+            if (edit.size > 0) {
+                // 执行编辑操作
+                const success = await vscode.workspace.applyEdit(edit);
+                
+                if (success) {
+                    // 更新装饰器
+                    await updateDecorations(editor);
+                    
+                    const count = linesToAddPrefix.size;
+                    vscode.window.showInformationMessage(
+                        `Added line number prefix to ${count} line${count > 1 ? 's' : ''}`
+                    );
+                }
+            }
+        })
     );
 
     // Ensure decorator types are properly cleaned up

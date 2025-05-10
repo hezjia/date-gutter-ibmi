@@ -50,6 +50,7 @@ The extension provides the following commands that can be accessed through the C
 
 - `Date Gutter: Copy Selected Lines`: Copies selected text without the 12-digit prefix
 - `Date Gutter: Delete Selected Lines`: Deletes selected lines completely (including prefix and gutter dates)
+- `Date Gutter: Add Line Number Prefix`: Adds 12-digit prefix (6-digit line number + 6 zeros) to selected lines
 
 ### Code Actions Menu
 
@@ -70,6 +71,11 @@ The extension provides quick access to operations through the Code Actions menu 
      * Includes hidden 12-digit prefix
      * Removes gutter date display
      * Works with multiple selections
+   - **Add Line Number Prefix**:
+     * Adds 12-digit prefix to selected lines
+     * First 6 digits are line number
+     * Last 6 digits are zeros (000000)
+     * Only adds to lines without existing prefix
 
 3. **Tips**:
    - Available for all supported IBMi file types
