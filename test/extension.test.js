@@ -7,47 +7,84 @@ suite('Date Gutter Extension Test Suite', () => {
     let document;
 
     suiteSetup(async () => {
-        // 创建一个临时文件用于测试
-        const workspaceEdit = new vscode.WorkspaceEdit();
-        const testFilePath = path.join(__dirname, 'test.txt');
-        const uri = vscode.Uri.file(testFilePath);
-        workspaceEdit.createFile(uri);
-        await vscode.workspace.applyEdit(workspaceEdit);
-        
-        // 打开文件
-        document = await vscode.workspace.openTextDocument(uri);
+        // 激活扩展
+        const extension = vscode.extensions.getExtension('zhuojia-he.date-gutter-ibmi');
+        await extension.activate();
+
+        // 创建测试文件
+        const testFileUri = vscode.Uri.file(path.join(__dirname, 'test-fixture.clle'));
+        try {
+            await vscode.workspace.fs.writeFile(testFileUri, new Uint8Array());
+        } catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+        }
+
+        // 打开测试文件
+        document = await vscode.workspace.openTextDocument(testFileUri);
         editor = await vscode.window.showTextDocument(document);
+        
+        // 等待扩展初始化完成
+        await new Promise(resolve => setTimeout(resolve, 500));
     });
 
     suiteTeardown(async () => {
-        // 关闭编辑器
-        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-        // 删除测试文件
-        const testFilePath = path.join(__dirname, 'test.txt');
-        const uri = vscode.Uri.file(testFilePath);
-        const workspaceEdit = new vscode.WorkspaceEdit();
-        workspaceEdit.deleteFile(uri);
-        await vscode.workspace.applyEdit(workspaceEdit);
+        try {
+            // 关闭编辑器
+            await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+            
+            // 删除测试文件
+            const testFileUri = vscode.Uri.file(path.join(__dirname, 'test-fixture.clle'));
+            try {
+                await vscode.workspace.fs.delete(testFileUri, { ignoreIfNotExists: true });
+            } catch (error) {
+                console.error('Error deleting test file:', error);
+            }
+        } catch (error) {
+            console.error('Error in suiteTeardown:', error);
+        }
+    });
+
+    test('Verify commands are registered', async () => {
+        const commands = await vscode.commands.getCommands();
+        console.log('Available commands:', commands.filter(cmd => cmd.startsWith('date-gutter')));
+        assert(commands.includes('date-gutter.copyWithoutPrefix'), 'copyWithoutPrefix command should be registered');
+        assert(commands.includes('date-gutter.removeLinesFromSelection'), 'removeLinesFromSelection command should be registered');
     });
 
     test('Copy without prefix command should work correctly', async () => {
-        // 重置剪贴板
-        await vscode.env.clipboard.writeText('');
-        // 准备测试数据
-        const edit = new vscode.WorkspaceEdit();
-        const testContent = '000001231123Hello\n000001231124World';
-        edit.insert(document.uri, new vscode.Position(0, 0), testContent);
-        await vscode.workspace.applyEdit(edit);
+        try {
+            // 重置剪贴板
+            await vscode.env.clipboard.writeText('');
+            
+            // 准备测试数据
+            const edit = new vscode.WorkspaceEdit();
+            const testContent = '000001231123Hello\n000001231124World';
+            edit.insert(document.uri, new vscode.Position(0, 0), testContent);
+            await vscode.workspace.applyEdit(edit);
 
-        // 选择文本
-        editor.selection = new vscode.Selection(0, 0, 1, 17);
+            console.log('Document content before test:', document.getText());
+            
+            // 选择文本
+            editor.selection = new vscode.Selection(0, 0, 1, 17);
+            console.log('Selection set:', editor.selection);
 
-        // 执行复制命令
-        await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
+            // 验证命令是否存在
+            const commands = await vscode.commands.getCommands();
+            console.log('Available commands:', commands.filter(cmd => cmd.startsWith('date-gutter')));
+            
+            // 执行复制命令
+            await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
+            console.log('Command executed');
 
-        // 验证剪贴板内容
-        const clipboardContent = await vscode.env.clipboard.readText();
-        assert.strictEqual(clipboardContent, 'Hello\nWorld');
+            // 验证剪贴板内容
+            const clipboardContent = await vscode.env.clipboard.readText();
+            console.log('Clipboard content:', clipboardContent);
+            
+            assert.strictEqual(clipboardContent, 'Hello\nWorld');
+        } catch (error) {
+            console.error('Test failed:', error);
+            throw error;
+        }
     });
 
     test('Delete selected lines command should work correctly', async () => {
