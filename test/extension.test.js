@@ -31,6 +31,8 @@ suite('Date Gutter Extension Test Suite', () => {
     });
 
     test('Copy without prefix command should work correctly', async () => {
+        // 重置剪贴板
+        await vscode.env.clipboard.writeText('');
         // 准备测试数据
         const edit = new vscode.WorkspaceEdit();
         const testContent = '000001231123Hello\n000001231124World';
@@ -59,7 +61,7 @@ suite('Date Gutter Extension Test Suite', () => {
         editor.selection = new vscode.Selection(1, 0, 1, 16);
 
         // 执行删除命令
-        await vscode.commands.executeCommand('date-gutter.removePrefixFromSelection');
+        await vscode.commands.executeCommand('date-gutter.removeLinesFromSelection');
 
         // 验证文件内容
         const content = document.getText();
@@ -84,6 +86,9 @@ suite('Date Gutter Extension Test Suite', () => {
     });
 
     test('Multi-line selection handling', async () => {
+        // 重置剪贴板
+        await vscode.env.clipboard.writeText('');
+
         // 准备测试数据
         const edit = new vscode.WorkspaceEdit();
         const testContent = '000001231123Line1\n000001231124Line2\nNoPrefix\n000001231125Line3';
@@ -129,5 +134,26 @@ suite('Date Gutter Extension Test Suite', () => {
         await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
         clipboardContent = await vscode.env.clipboard.readText();
         assert.strictEqual(clipboardContent, 'Last');
+    });
+
+    test('Set Date to Zero command should work correctly', async () => {
+        // 准备测试数据
+        const edit = new vscode.WorkspaceEdit();
+        const testContent = '000001231123Line1\n000002231124Line2\nNoPrefix\n000004231125Line3';
+        edit.insert(document.uri, new vscode.Position(0, 0), testContent);
+        await vscode.workspace.applyEdit(edit);
+
+        // 选择多行
+        editor.selection = new vscode.Selection(0, 0, 3, 16);
+
+        // 执行设置日期为0命令
+        await vscode.commands.executeCommand('date-gutter.setDateToZero');
+
+        // 验证文件内容
+        const content = document.getText();
+        assert.strictEqual(content.includes('000001000000Line1'), true);
+        assert.strictEqual(content.includes('000002000000Line2'), true);
+        assert.strictEqual(content.includes('NoPrefix'), true);
+        assert.strictEqual(content.includes('000004000000Line3'), true);
     });
 });

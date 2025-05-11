@@ -1,4 +1,5 @@
 import { defineConfig } from '@vscode/test-cli';
+import * as path from 'path';
 
 export default defineConfig({
     files: 'test/**/*.test.js',

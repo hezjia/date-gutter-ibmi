@@ -1,10 +1,47 @@
-.vscode/**
-.vscode-test/**
-test/**
-.gitignore
-.yarnrc
+# VS Code extension ignore file
+# Documentation: https://aka.ms/vscode-vscodeignore
+
+# Build artifacts
+out/
+dist/
+*.vsix
+
+# Test files
+test/
+coverage/
+
+# Development files
+.vscode/
+*.bak
+*.log
+*.tmp
+
+# Documentation
 vsc-extension-quickstart.md
-**/jsconfig.json
-**/*.map
-**/eslint.config.mjs
-**/.vscode-test.*
+
+# Node.js files
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Editor files
+*.swp
+*.swo
+.idea/
+.vscode-test.js
+
+# Source control
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Linting/formatting
+.eslintrc*
+.prettierrc*
+tsconfig.json

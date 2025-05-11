@@ -340,11 +340,27 @@ class DateGutterActionProvider {
         addPrefixAction.isPreferred = false;
         actions.push(addPrefixAction);
 
+        // 创建将日期设置为0的操作
+        const setDateToZeroAction = new vscode.CodeAction(
+            'Set Date to Zero',
+            vscode.CodeActionKind.RefactorRewrite
+        );
+        setDateToZeroAction.command = {
+            command: 'date-gutter.setDateToZero',
+            title: 'Set Date to Zero',
+            tooltip: 'Set the date part of selected lines to 000000'
+        };
+        // 设置操作的适用范围
+        setDateToZeroAction.isPreferred = false;
+        actions.push(setDateToZeroAction);
+
         return actions;
     }
 }
 
+// This method is called when your extension is activated
 function activate(context) {
+    // The module needs to export the activate function
     // 注册 CodeAction 提供器（支持Git差异视图）
     context.subscriptions.push(
         vscode.languages.registerCodeActionsProvider(
@@ -956,6 +972,67 @@ function activate(context) {
                     const count = linesToAddPrefix.size;
                     vscode.window.showInformationMessage(
                         `Added line number prefix to ${count} line${count > 1 ? 's' : ''}`
+                    );
+                }
+            }
+        })
+    );
+
+    // 注册将日期设置为0的命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('date-gutter.setDateToZero', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || !editor.document) return;
+
+            if (!shouldEnableForFile(editor.document)) {
+                return;
+            }
+
+            const edit = new vscode.WorkspaceEdit();
+            const document = editor.document;
+            const zeroDate = "000000"; // 6位全0作为日期部分
+            
+            // 收集所有要修改的行
+            const linesToModify = new Set();
+            
+            for (const selection of editor.selections) {
+                for (let i = selection.start.line; i <= selection.end.line; i++) {
+                    const line = document.lineAt(i);
+                    const text = line.text;
+                    
+                    // 只修改有12位前缀的行
+                    if (text.length >= 12 && /^\d{12}/.test(text)) {
+                        linesToModify.add(i);
+                    }
+                }
+            }
+
+            // 按行号排序
+            const sortedLines = Array.from(linesToModify).sort((a, b) => a - b);
+            
+            // 修改日期部分为0
+            for (const lineNum of sortedLines) {
+                edit.replace(
+                    document.uri,
+                    new vscode.Range(
+                        new vscode.Position(lineNum, 6),  // 日期部分开始位置
+                        new vscode.Position(lineNum, 12)  // 日期部分结束位置
+                    ),
+                    zeroDate
+                );
+            }
+
+            if (edit.size > 0) {
+                // 执行编辑操作
+                const success = await vscode.workspace.applyEdit(edit);
+                
+                if (success) {
+                    // 更新装饰器
+                    await updateDecorations(editor);
+                    
+                    const count = linesToModify.size;
+                    vscode.window.showInformationMessage(
+                        `Set date to zero for ${count} line${count > 1 ? 's' : ''}`
                     );
                 }
             }

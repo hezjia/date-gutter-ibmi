@@ -51,6 +51,7 @@ The extension provides the following commands that can be accessed through the C
 - `Date Gutter: Copy Selected Lines`: Copies selected text without the 12-digit prefix
 - `Date Gutter: Delete Selected Lines`: Deletes selected lines completely (including prefix and gutter dates)
 - `Date Gutter: Add Line Number Prefix`: Adds 12-digit prefix (6-digit line number + 6 zeros) to selected lines
+- `Date Gutter: Set Date to Zero`: Sets the date part (positions 7-12) to "000000" for selected lines
 
 ### Code Actions Menu
 
@@ -76,6 +77,11 @@ The extension provides quick access to operations through the Code Actions menu 
      * First 6 digits are line number
      * Last 6 digits are zeros (000000)
      * Only adds to lines without existing prefix
+   - **Set Date to Zero**:
+     * Sets the date part (positions 7-12) to "000000"
+     * Preserves the line number part (positions 1-6)
+     * Only affects lines with 12-digit prefix
+     * Works with multiple selections
 
 3. **Tips**:
    - Available for all supported IBMi file types
@@ -184,7 +190,26 @@ None at this time.
 
 ---
 
-## Contributing
+## Development
+
+### Building the Extension
+
+For optimal performance, the extension should be bundled before publishing:
+
+1. Install dependencies: `npm install`
+2. Build the extension: `npm run compile`
+3. Package for distribution: `npm run package`
+
+This will create a bundled version in the `dist` folder.
+
+### Performance Optimization
+
+To improve performance:
+- The extension is bundled using Webpack
+- Unnecessary files are excluded via `.vscodeignore`
+- Only production dependencies are included
+
+### Contributing
 
 Feel free to submit issues and enhancement requests on our GitHub repository.
 
@@ -198,8 +223,63 @@ To run the tests:
 
 For development:
 - Use `npm run test:watch` to run tests in watch mode
+- Use `npm run watch` for development mode with hot reload
 - Tests are located in the `test` directory
 - Test fixtures are in `test/fixtures`
+
+## Publishing to Marketplace
+
+### Prerequisites
+- Microsoft account
+- Azure DevOps organization
+- Personal Access Token (PAT) with Marketplace > Manage scope
+
+### Steps to Publish
+
+1. **Prepare for Publishing**:
+   ```bash
+   npm run package  # Creates the VSIX package in dist/ folder
+   ```
+
+2. **Create Publisher** (if first time):
+   - Go to https://marketplace.visualstudio.com/manage
+   - Create new publisher (e.g., "your-publisher-name")
+   - Verify publisher ownership
+
+3. **Get Personal Access Token**:
+   - Create PAT at https://dev.azure.com/_users/settings/tokens
+   - Scope: Marketplace > Manage
+   - Copy and save the token securely
+
+4. **Login with vsce**:
+   ```bash
+   npx vsce login your-publisher-name
+   ```
+   (Enter your PAT when prompted)
+
+5. **Publish the Extension**:
+   - For new release:
+     ```bash
+     npx vsce publish -p $YOUR_PAT
+     ```
+   - For patch update:
+     ```bash
+     npx vsce publish patch -p $YOUR_PAT
+     ```
+   - For specific version:
+     ```bash
+     npx vsce publish 2.0.1 -p $YOUR_PAT
+     ```
+
+6. **Verify Publication**:
+   - Check your extension page on Marketplace
+   - It may take a few minutes to appear
+
+### Publishing Options
+- `major`: Major version bump
+- `minor`: Minor version bump
+- `patch`: Patch version bump
+- Specific version: `npx vsce publish x.x.x`
 
 ## License
 
