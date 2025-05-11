@@ -5,6 +5,7 @@ const path = require('path');
 suite('Date Gutter Extension Test Suite', () => {
     let editor;
     let document;
+    let dateGutterDecorationType;
 
     suiteSetup(async () => {
         // 激活扩展
@@ -22,7 +23,17 @@ suite('Date Gutter Extension Test Suite', () => {
         // 打开测试文件
         document = await vscode.workspace.openTextDocument(testFileUri);
         editor = await vscode.window.showTextDocument(document);
-        
+
+        // 模拟装饰器类型
+        dateGutterDecorationType = vscode.window.createTextEditorDecorationType({
+            isWholeLine: true,
+            after: {
+                contentText: '',
+                color: 'blue',
+                margin: '0 0 0 1em'
+            }
+        });
+
         // 等待扩展初始化完成
         await new Promise(resolve => setTimeout(resolve, 500));
     });
@@ -88,6 +99,15 @@ suite('Date Gutter Extension Test Suite', () => {
     });
 
     test('Delete selected lines command should work correctly', async () => {
+        // 清空文件内容
+        const clearEdit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+            new vscode.Position(0, 0),
+            document.lineAt(document.lineCount - 1).range.end
+        );
+        clearEdit.delete(document.uri, fullRange);
+        await vscode.workspace.applyEdit(clearEdit);
+
         // 准备测试数据
         const edit = new vscode.WorkspaceEdit();
         const testContent = '000001231123Line1\n000001231124Line2\n000001231125Line3';
@@ -106,6 +126,15 @@ suite('Date Gutter Extension Test Suite', () => {
     });
 
     test('Decorations should update after text changes', async () => {
+        // 清空文件内容
+        const clearEdit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+            new vscode.Position(0, 0),
+            document.lineAt(document.lineCount - 1).range.end
+        );
+        clearEdit.delete(document.uri, fullRange);
+        await vscode.workspace.applyEdit(clearEdit);
+
         // 准备测试数据
         const edit = new vscode.WorkspaceEdit();
         const testContent = '000001231123Test';
@@ -113,13 +142,18 @@ suite('Date Gutter Extension Test Suite', () => {
         await vscode.workspace.applyEdit(edit);
 
         // 等待装饰器更新
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         // 验证装饰器是否存在
-        // 注意：由于装饰器API的限制，我们无法直接访问装饰器，
-        // 但我们可以验证文本内容是否正确
-        const content = document.getText();
-        assert.strictEqual(content.startsWith('000001231123'), true);
+        const decorations = editor.getDecorations(dateGutterDecorationType);
+        assert.ok(decorations && decorations.length > 0, 'Decorations should be applied');
+
+        // 验证装饰器的具体内容和样式
+        const decoration = decorations[0];
+        assert.strictEqual(decoration.range.start.line, 0, 'Decoration should start on the first line');
+        assert.strictEqual(decoration.range.end.line, 0, 'Decoration should end on the first line');
+        assert.strictEqual(decoration.renderOptions.before.contentText, '000001231123', 'Decoration prefix should match');
+        assert.ok(decoration.renderOptions.before.color, 'Decoration should have a color');
     });
 
     test('Multi-line selection handling', async () => {
@@ -161,13 +195,14 @@ suite('Date Gutter Extension Test Suite', () => {
         await vscode.workspace.applyEdit(edit);
 
         // 测试第一行
-        editor.selection = new vscode.Selection(0, 0, 0, 16);
+        editor.selection = new vscode.Selection(0, 0, 0, document.lineAt(0).text.length);
         await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
         let clipboardContent = await vscode.env.clipboard.readText();
         assert.strictEqual(clipboardContent, 'First');
 
         // 测试最后一行
-        editor.selection = new vscode.Selection(2, 0, 2, 15);
+        const lastLine = document.lineCount - 1;
+        editor.selection = new vscode.Selection(lastLine, 0, lastLine, document.lineAt(lastLine).text.length);
         await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
         clipboardContent = await vscode.env.clipboard.readText();
         assert.strictEqual(clipboardContent, 'Last');
@@ -192,5 +227,29 @@ suite('Date Gutter Extension Test Suite', () => {
         assert.strictEqual(content.includes('000002000000Line2'), true);
         assert.strictEqual(content.includes('NoPrefix'), true);
         assert.strictEqual(content.includes('000004000000Line3'), true);
+    });
+
+    test('Performance test for large file', async () => {
+        // 创建一个包含 10,000 行的测试文件
+        const largeContent = Array.from({ length: 10000 }, (_, i) => `000001231123Line${i + 1}`).join('\n');
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(document.uri, new vscode.Position(0, 0), largeContent);
+        await vscode.workspace.applyEdit(edit);
+
+        // 测试 copyWithoutPrefix 命令性能
+        editor.selection = new vscode.Selection(0, 0, 9999, document.lineAt(9999).text.length);
+        console.time('copyWithoutPrefix performance');
+        await vscode.commands.executeCommand('date-gutter.copyWithoutPrefix');
+        console.timeEnd('copyWithoutPrefix performance');
+
+        // 测试 setDateToZero 命令性能
+        console.time('setDateToZero performance');
+        await vscode.commands.executeCommand('date-gutter.setDateToZero');
+        console.timeEnd('setDateToZero performance');
+
+        // 验证命令执行后文件内容是否正确
+        const content = document.getText();
+        assert.strictEqual(content.includes('000001000000Line1'), true);
+        assert.strictEqual(content.includes('000001000000Line10000'), true);
     });
 });
