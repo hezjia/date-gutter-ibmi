@@ -781,6 +781,18 @@ function activate(context) {
         }
     }, 100);
 
+    // 跟踪最近的撤销/重做操作
+    let isUndoRedoOperation = false;
+    
+    // 监听撤销/重做操作
+    context.subscriptions.push(
+        vscode.workspace.onWillChangeTextDocument(event => {
+            // 检测撤销/重做操作
+            isUndoRedoOperation = event.reason === vscode.TextDocumentChangeReason.Undo || 
+                                 event.reason === vscode.TextDocumentChangeReason.Redo;
+        })
+    );
+
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(async event => {
             try {
@@ -812,6 +824,14 @@ function activate(context) {
                 
                 if (isCopilotEdit) {
                     console.log('Detected potential Copilot edit - skipping');
+                    return;
+                }
+                
+                // 如果是撤销/重做操作，只更新装饰器，不修改日期
+                if (isUndoRedoOperation) {
+                    console.log('Undo/Redo operation detected - preserving original dates');
+                    await updateDecorations(activeEditor);
+                    isUndoRedoOperation = false;
                     return;
                 }
     

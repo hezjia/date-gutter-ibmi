@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [1.3.2] - 2025-05-11
+
+### Fixed
+- Preserve original dates during undo/redo operations
+- Fixed flickering when selecting lines in other files
+- Improved decoration update performance
+
 ## [1.3.0] - 2025-05-10
 
 ### Added
