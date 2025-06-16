@@ -119,6 +119,9 @@ This extension contributes the following settings:
 
 * `dateGutter.enabled`: Enable/disable the date gutter extension (default: `true`)
 * `dateGutter.enabledFileTypes`: Array of file extensions where date gutter should be enabled
+* `dateGutter.rememberPrefixRemoval`: Controls whether to remember prefix removal history (default: `true`)
+  - When enabled, prevents re-adding prefix to lines where it was previously removed
+  - When disabled, allows prefix to be re-added regardless of removal history
 
 Default supported IBMi source types:
 - `.rpgle` (RPG ILE)

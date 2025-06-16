@@ -5,6 +5,15 @@ All notable changes to the "date-gutter-ibmi" extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-05-16
+
+### Added
+- New configuration option: `dateGutter.rememberPrefixRemoval`
+  - Controls whether to remember prefix removal history
+  - When enabled (default), prevents re-adding prefix to lines where it was previously removed
+  - When disabled, allows prefix to be re-added regardless of removal history
+  - Applies to both automatic and manual prefix addition
+
 ## [1.4.0] - 2025-05-15
 
 ### Added

@@ -3,7 +3,7 @@
   "publisher": "zhuojia-he",
   "displayName": "Date Gutter for IBMi",
   "description": "Display and update YYMMDD dates in the gutter for IBMi source files",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/hezjia/date-gutter-ibmi.git"
@@ -50,29 +50,9 @@
     "menus": {
       "editor/context": [
         {
-          "command": "date-gutter.copyWithoutPrefix",
-          "when": "editorTextFocus",
-          "group": "date-gutter@1"
-        },
-        {
           "command": "date-gutter.removePrefix",
           "when": "editorTextFocus",
-          "group": "date-gutter@2"
-        },
-        {
-          "command": "date-gutter.removeLinesFromSelection",
-          "when": "editorTextFocus",
-          "group": "date-gutter@3"
-        },
-        {
-          "command": "date-gutter.addPrefixToSelection",
-          "when": "editorTextFocus",
-          "group": "date-gutter@4"
-        },
-        {
-          "command": "date-gutter.setDateToZero",
-          "when": "editorTextFocus",
-          "group": "date-gutter@5"
+          "group": "date-gutter@1"
         }
       ]
     },
@@ -103,6 +83,11 @@
             ".srvpgm"
           ],
           "description": "File extensions where date gutter should be enabled (case insensitive). Default includes RPGLE, SQLRPGLE, CLLE and other IBMi source types"
+        },
+        "dateGutter.rememberPrefixRemoval": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remember when prefixes are removed from a file, allowing them to be added back later"
         }
       }
     }

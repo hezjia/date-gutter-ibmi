@@ -358,6 +358,10 @@ class DateGutterActionProvider {
     }
 }
 
+// 全局变量用于跟踪最后一次删除前缀的操作
+let lastPrefixRemovalTime = 0;
+let lastPrefixRemovalFile = '';
+
 // This method is called when your extension is activated
 function activate(context) {
     // The module needs to export the activate function
@@ -548,9 +552,68 @@ function activate(context) {
                 return;
             }
 
+            const document = activeEditor.document;
+            const currentFileUri = document.uri.toString();
+            
+            // 检查配置是否启用记住删除前缀的历史
+            const config = getConfiguration();
+            const rememberPrefixRemoval = config.get('rememberPrefixRemoval', true);
+            
+            // 检查是否执行过删除前缀操作（不设置时间限制）
+            const isSameFile = currentFileUri === lastPrefixRemovalFile;
+            const hasRemovedPrefix = rememberPrefixRemoval && lastPrefixRemovalTime > 0 && isSameFile;
+            
+            // 如果执行过删除前缀操作且配置启用了记住删除前缀的历史，则不自动添加前缀
+            if (hasRemovedPrefix) {
+                console.log('Skipping automatic prefix addition due to recent prefix removal');
+                // 只更新现有前缀的日期，不添加新前缀
+                const edit = new vscode.WorkspaceEdit();
+                const newDate = formatDateToYYMMDD(new Date());
+                
+                // 将待更新的行按行号排序
+                const sortedUpdates = Array.from(pendingUpdates)
+                    .sort((a, b) => a.number - b.number);
+                
+                // 只处理已有前缀的行
+                for (const line of sortedUpdates) {
+                    try {
+                        if (line.number < 0 || line.number >= document.lineCount) {
+                            continue;
+                        }
+                        
+                        const lineText = document.lineAt(line.number).text;
+                        
+                        // 只更新已有前缀的行，不添加新前缀
+                        if (!line.isNew && lineText.length >= 12 && /^\d{12}/.test(lineText)) {
+                            edit.replace(
+                                document.uri,
+                                new vscode.Range(
+                                    new vscode.Position(line.number, 6),
+                                    new vscode.Position(line.number, 12)
+                                ),
+                                newDate
+                            );
+                        }
+                    } catch (error) {
+                        console.error(`Error processing line ${line.number}:`, error);
+                        continue;
+                    }
+                }
+                
+                // 应用编辑
+                if (edit.size > 0) {
+                    await vscode.workspace.applyEdit(edit);
+                }
+                
+                // 更新装饰器
+                await updateDecorations(activeEditor);
+                pendingUpdates.clear();
+                isUpdating = false;
+                return;
+            }
+
             const edit = new vscode.WorkspaceEdit();
             const newDate = formatDateToYYMMDD(new Date());
-            const document = activeEditor.document;
 
             // 将待更新的行按行号排序
             const sortedUpdates = Array.from(pendingUpdates)
@@ -979,6 +1042,144 @@ function activate(context) {
         // 注册删除前缀命令
         context.subscriptions.push(
             vscode.commands.registerCommand('date-gutter.removePrefix', async () => {
+                try {
+                    const editor = vscode.window.activeTextEditor;
+                    if (!editor || !editor.document) {
+                        throw new Error('No active editor');
+                    }
+
+                    if (!shouldEnableForFile(editor.document)) {
+                        vscode.window.showWarningMessage('This file type is not supported for prefix removal.');
+                        return;
+                    }
+
+                    const document = editor.document;
+                    const hasSelection = editor.selections.some(selection => !selection.isEmpty);
+                    
+                    // 如果没有选择，询问用户是否要处理整个文档
+                    if (!hasSelection) {
+                        const choice = await vscode.window.showWarningMessage(
+                            'No text selected. Do you want to remove prefixes from the entire document?',
+                            'Yes', 'No'
+                        );
+                        if (choice !== 'Yes') {
+                            return;
+                        }
+                    }
+
+                    // 创建进度提示
+                    await vscode.window.withProgress({
+                        location: vscode.ProgressLocation.Notification,
+                        title: "Removing prefixes...",
+                        cancellable: true
+                    }, async (progress, token) => {
+                        const edit = new vscode.WorkspaceEdit();
+                        const linesToModify = new Set();
+                        
+                        // 收集要修改的行
+                        if (hasSelection) {
+                            for (const selection of editor.selections) {
+                                for (let i = selection.start.line; i <= selection.end.line; i++) {
+                                    if (token.isCancellationRequested) {
+                                        return;
+                                    }
+                                    const line = document.lineAt(i);
+                                    if (line.text.length >= 12 && /^\d{12}/.test(line.text)) {
+                                        linesToModify.add(i);
+                                    }
+                                }
+                            }
+                        } else {
+                            const totalLines = document.lineCount;
+                            for (let i = 0; i < totalLines; i++) {
+                                if (token.isCancellationRequested) {
+                                    return;
+                                }
+                                if (i % 1000 === 0) {
+                                    progress.report({ 
+                                        increment: (i / totalLines) * 100,
+                                        message: `Scanning line ${i}/${totalLines}`
+                                    });
+                                }
+                                const line = document.lineAt(i);
+                                if (line.text.length >= 12 && /^\d{12}/.test(line.text)) {
+                                    linesToModify.add(i);
+                                }
+                            }
+                        }
+
+                        if (linesToModify.size === 0) {
+                            vscode.window.showInformationMessage('No lines with prefixes found.');
+                            return;
+                        }
+
+                        // 按行号排序并批量处理
+                        const sortedLines = Array.from(linesToModify).sort((a, b) => a - b);
+                        const batchSize = 1000;
+                        
+                        for (let i = 0; i < sortedLines.length; i += batchSize) {
+                            if (token.isCancellationRequested) {
+                                return;
+                            }
+                            
+                            const batch = sortedLines.slice(i, i + batchSize);
+                            progress.report({ 
+                                increment: (i / sortedLines.length) * 100,
+                                message: `Processing lines ${i + 1}-${Math.min(i + batchSize, sortedLines.length)}`
+                            });
+
+                            for (const lineNum of batch) {
+                                edit.replace(
+                                    document.uri,
+                                    new vscode.Range(
+                                        new vscode.Position(lineNum, 0),
+                                        new vscode.Position(lineNum, 12)
+                                    ),
+                                    ""
+                                );
+                            }
+                        }
+
+                        // 执行编辑操作
+                        const success = await vscode.workspace.applyEdit(edit);
+                        if (success) {
+                            // 更新装饰器
+                            await updateDecorations(editor);
+                            
+                            // 调整光标位置
+                            const newSelections = editor.selections.map(sel => {
+                                if (sel.start.character >= 12) {
+                                    return new vscode.Selection(
+                                        sel.start.translate(0, -12),
+                                        sel.end.translate(0, -12)
+                                    );
+                                }
+                                return sel;
+                            });
+                            editor.selections = newSelections;
+
+                            // 记录删除前缀操作的时间和文件
+                            lastPrefixRemovalTime = Date.now();
+                            lastPrefixRemovalFile = document.uri.toString();
+
+                            const count = linesToModify.size;
+                            const message = hasSelection 
+                                ? `Removed prefix from ${count} selected line${count > 1 ? 's' : ''}`
+                                : `Removed prefix from ${count} line${count > 1 ? 's' : ''} in the entire document`;
+                            
+                            vscode.window.showInformationMessage(message);
+                        }
+                    });
+                } catch (error) {
+                    console.error('Error in removePrefix command:', error);
+                    vscode.window.showErrorMessage(`Failed to remove prefixes: ${error.message}`);
+                }
+            })
+        );
+
+    // 注册添加前缀命令
+            context.subscriptions.push(
+                vscode.commands.registerCommand('date-gutter.addPrefixToSelection', async () => {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor || !editor.document) return;
 
@@ -986,56 +1187,56 @@ function activate(context) {
                     return;
                 }
 
-                const edit = new vscode.WorkspaceEdit();
                 const document = editor.document;
+                const currentFileUri = document.uri.toString();
             
-                // 收集所有要修改的行
-                const linesToModify = new Set();
-            
-                // 检查是否有选择
-                const hasSelection = editor.selections.some(selection => !selection.isEmpty);
-            
-                if (hasSelection) {
-                    // 如果有选择，只处理选择的行
-                    for (const selection of editor.selections) {
-                        for (let i = selection.start.line; i <= selection.end.line; i++) {
-                            const line = document.lineAt(i);
-                            const text = line.text;
-                        
-                            // 只修改有12位前缀的行
-                            if (text.length >= 12 && /^\d{12}/.test(text)) {
-                                linesToModify.add(i);
-                            }
-                        }
+                // 检查配置是否启用记住删除前缀的历史
+                const config = getConfiguration();
+                const rememberPrefixRemoval = config.get('rememberPrefixRemoval', true);
+
+                // 检查是否执行过删除前缀操作（不设置时间限制）
+                const isSameFile = currentFileUri === lastPrefixRemovalFile;
+                const hasRemovedPrefix = rememberPrefixRemoval && lastPrefixRemovalTime > 0 && isSameFile;
+
+                if (hasRemovedPrefix) {
+                    const choice = await vscode.window.showWarningMessage(
+                        'Prefixes were previously removed from this file. Do you want to add them back?',
+                        'Yes', 'No'
+                    );
+                
+                    if (choice !== 'Yes') {
+                        return;
                     }
-                } else {
-                    // 如果没有选择，处理整个文档
-                    for (let i = 0; i < document.lineCount; i++) {
+                }
+
+                const edit = new vscode.WorkspaceEdit();
+                const newDate = "000000"; // 6位全0作为日期部分
+            
+                // 收集所有要添加前缀的行
+                const linesToAddPrefix = new Set();
+            
+                for (const selection of editor.selections) {
+                    for (let i = selection.start.line; i <= selection.end.line; i++) {
                         const line = document.lineAt(i);
                         const text = line.text;
                     
-                        // 只修改有12位前缀的行
-                        if (text.length >= 12 && /^\d{12}/.test(text)) {
-                            linesToModify.add(i);
+                        // 只对没有12位前缀的行添加前缀
+                        if (!(text.length >= 12 && /^\d{12}/.test(text))) {
+                            linesToAddPrefix.add(i);
                         }
                     }
                 }
 
                 // 按行号排序
-                const sortedLines = Array.from(linesToModify).sort((a, b) => a - b);
+                const sortedLines = Array.from(linesToAddPrefix).sort((a, b) => a - b);
             
-                // 删除前12位字符
+                // 添加前缀
                 for (const lineNum of sortedLines) {
-                    const line = document.lineAt(lineNum);
-                    const text = line.text;
-                
-                    edit.replace(
+                    const sequence = generateLineNumber(lineNum);
+                    edit.insert(
                         document.uri,
-                        new vscode.Range(
-                            new vscode.Position(lineNum, 0),  // 行首
-                            new vscode.Position(lineNum, 12)  // 前12位结束位置
-                        ),
-                        ""  // 替换为空字符串，即删除
+                        new vscode.Position(lineNum, 0),
+                        sequence + newDate
                     );
                 }
 
@@ -1047,74 +1248,19 @@ function activate(context) {
                         // 更新装饰器
                         await updateDecorations(editor);
                     
-                        const count = linesToModify.size;
-                        const message = hasSelection 
-                            ? `Removed prefix from ${count} selected line${count > 1 ? 's' : ''}`
-                            : `Removed prefix from ${count} line${count > 1 ? 's' : ''} in the entire document`;
+                        // 重置删除前缀操作的记录，因为现在已经添加了前缀
+                        if (isSameFile) {
+                            lastPrefixRemovalTime = 0;
+                            lastPrefixRemovalFile = '';
+                        }
                     
-                        vscode.window.showInformationMessage(message);
+                        const count = linesToAddPrefix.size;
+                        vscode.window.showInformationMessage(
+                            `Added line number prefix to ${count} line${count > 1 ? 's' : ''}`
+                        );
                     }
                 }
             })
-        );
-
-    // 注册添加前缀命令
-    context.subscriptions.push(
-        vscode.commands.registerCommand('date-gutter.addPrefixToSelection', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor || !editor.document) return;
-
-            if (!shouldEnableForFile(editor.document)) {
-                return;
-            }
-
-            const edit = new vscode.WorkspaceEdit();
-            const document = editor.document;
-            const newDate = "000000"; // 6位全0作为日期部分
-            
-            // 收集所有要添加前缀的行
-            const linesToAddPrefix = new Set();
-            
-            for (const selection of editor.selections) {
-                for (let i = selection.start.line; i <= selection.end.line; i++) {
-                    const line = document.lineAt(i);
-                    const text = line.text;
-                    
-                    // 只对没有12位前缀的行添加前缀
-                    if (!(text.length >= 12 && /^\d{12}/.test(text))) {
-                        linesToAddPrefix.add(i);
-                    }
-                }
-            }
-
-            // 按行号排序
-            const sortedLines = Array.from(linesToAddPrefix).sort((a, b) => a - b);
-            
-            // 添加前缀
-            for (const lineNum of sortedLines) {
-                const sequence = generateLineNumber(lineNum);
-                edit.insert(
-                    document.uri,
-                    new vscode.Position(lineNum, 0),
-                    sequence + newDate
-                );
-            }
-
-            if (edit.size > 0) {
-                // 执行编辑操作
-                const success = await vscode.workspace.applyEdit(edit);
-                
-                if (success) {
-                    // 更新装饰器
-                    await updateDecorations(editor);
-                    
-                    const count = linesToAddPrefix.size;
-                    vscode.window.showInformationMessage(
-                        `Added line number prefix to ${count} line${count > 1 ? 's' : ''}`
-                    );
-                }
-            }
-        })
     );
 
     // 注册将日期设置为0的命令
