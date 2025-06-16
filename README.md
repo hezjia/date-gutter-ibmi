@@ -82,6 +82,13 @@ The extension provides quick access to operations through the Code Actions menu 
      * Preserves the line number part (positions 1-6)
      * Only affects lines with 12-digit prefix
      * Works with multiple selections
+   - **Remove 12-digit Prefix**:
+     * Removes the 12-digit prefix from lines
+     * Works in two modes:
+       - Selection mode: Only processes selected lines
+       - Full document mode: Processes all lines when no selection
+     * Only affects lines with valid 12-digit prefix
+     * Shows operation summary in status message
 
 3. **Tips**:
    - Available for all supported IBMi file types

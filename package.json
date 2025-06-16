@@ -3,7 +3,7 @@
   "publisher": "zhuojia-he",
   "displayName": "Date Gutter for IBMi",
   "description": "Display and update YYMMDD dates in the gutter for IBMi source files",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/hezjia/date-gutter-ibmi.git"
@@ -27,6 +27,11 @@
         "category": "Date Gutter"
       },
       {
+        "command": "date-gutter.removePrefix",
+        "title": "Remove 12-digit Prefix",
+        "category": "Date Gutter"
+      },
+      {
         "command": "date-gutter.removeLinesFromSelection",
         "title": "Delete Selected Lines",
         "category": "Date Gutter"
@@ -42,6 +47,35 @@
         "category": "Date Gutter"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "date-gutter.copyWithoutPrefix",
+          "when": "editorTextFocus",
+          "group": "date-gutter@1"
+        },
+        {
+          "command": "date-gutter.removePrefix",
+          "when": "editorTextFocus",
+          "group": "date-gutter@2"
+        },
+        {
+          "command": "date-gutter.removeLinesFromSelection",
+          "when": "editorTextFocus",
+          "group": "date-gutter@3"
+        },
+        {
+          "command": "date-gutter.addPrefixToSelection",
+          "when": "editorTextFocus",
+          "group": "date-gutter@4"
+        },
+        {
+          "command": "date-gutter.setDateToZero",
+          "when": "editorTextFocus",
+          "group": "date-gutter@5"
+        }
+      ]
+    },
     "configuration": {
       "title": "Date Gutter",
       "properties": {
